@@ -66,6 +66,7 @@ case "\${1:-}" in
     git -C "\$APP" pull --ff-only && (cd "\$APP" && npm ci --no-audit --no-fund && npm run build >/dev/null)
     echo "Updated."; exit 0 ;;
   setup) exec bash "\$APP/setup.sh" ;;
+  uninstall) exec bash "\$APP/uninstall.sh" ;;
   whisper) shift; exec bash "\$APP/whisper.sh" "\$@" ;;
   cli) shift; cd "\$APP"; exec node dist/cli.js "\$@" ;;
 esac
@@ -92,6 +93,7 @@ cat <<DONE
   Change settings: instagram-scraper setup
   Local Whisper:   instagram-scraper whisper start|stop|status
   Update:          instagram-scraper update
+  Remove it:       instagram-scraper uninstall
   Command line:    instagram-scraper cli help
 
 $PATH_NOTE
