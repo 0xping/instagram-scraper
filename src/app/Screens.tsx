@@ -9,6 +9,33 @@ export function usePanelHeight(reserved = 9): number {
   return Math.max(8, (stdout.rows || 24) - reserved);
 }
 
+
+/** How long ago, in words a person reads at a glance. */
+export function ago(iso: string | null): string {
+  if (!iso) return 'never';
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 0) return 'just now';
+  if (minutes < 2) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return days < 30 ? `${days} day${days === 1 ? '' : 's'} ago` : new Date(iso).toISOString().slice(0, 10);
+}
+
+/** Whether this account is fully collected, and when that last happened. */
+export function accountSummary(r: StatusRow): string {
+  const when = ago(r.jobAt ?? r.lastScrapedAt);
+  if (r.jobStatus === 'running') return 'collecting now';
+  if (!r.discovered && !r.lastScrapedAt) return 'never collected';
+  const posts = `${r.discovered} post${r.discovered === 1 ? '' : 's'}`;
+  if (r.failed) return `${posts} · ${r.failed} need attention · ${when}`;
+  if (r.jobStatus === 'complete' && r.metadata >= r.discovered) return `${posts} · all collected · ${when}`;
+  if (!r.jobStatus) return `${posts} · not collected yet · ${when}`;
+  const why = r.jobError === 'interrupted' ? 'stopped early' : r.jobStatus === 'blocked' ? 'Instagram blocked it' : 'unfinished';
+  return `${posts} · ${why}, run again · ${when}`;
+}
+
 const stageNames: Record<string, string> = {
   session: 'Instagram connection', profile: 'Account details', discovery: 'Find posts',
   metadata: 'Post details', media: 'Photos', reels: 'Videos', frames: 'Video images',
@@ -52,7 +79,7 @@ export function HomeView({ state, selected, logs, actions, actionIndex }: {
       <Box borderStyle="single" flexDirection="column" flexGrow={1} paddingX={1}>
         <Text bold>Accounts ({rows.length})</Text>
         {rows.length === 0 ? <Text>Add an Instagram account to track.</Text> : rows.slice(0, listed).map((r: StatusRow) =>
-          <Text key={r.username} wrap="truncate-end">@{r.username} · {r.failed ? `${r.failed} need attention` : r.discovered ? `${r.discovered} posts saved` : 'Not collected yet'}</Text>)}
+          <Text key={r.username} wrap="truncate-end">@{r.username} · {accountSummary(r)}</Text>)}
         {rows.length > listed ? <Text dimColor>and {rows.length - listed} more</Text> : null}
         <Text> </Text>
         <Text bold>{selected ? `Latest activity · @${selected}` : 'Latest activity'}</Text>

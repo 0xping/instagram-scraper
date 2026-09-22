@@ -44,6 +44,9 @@ function routeChromium(server) {
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Ink styles markers and labels separately, so matching needs the frame without colour codes. */
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+const plain = (frame) => (frame ?? '').replace(ANSI, '');
 // Generous: the whole suite runs these files in parallel, so a real browser run here competes for the CPU.
 async function until(check, timeoutMs = 600_000) {
   const deadline = Date.now() + timeoutMs;
@@ -102,9 +105,9 @@ test('the dashboard collects an account and stops a run on request', { timeout: 
     // Collecting is refused until the saved session has been checked, which the dashboard does on startup.
     await until(() => ui.lastFrame()?.includes('Instagram: connected'));
     await choose(ui, 'Collect posts and media');
-    await until(() => ui.lastFrame()?.includes('Which accounts should be collected?'));
-    ui.stdin.write('\x1b[B'); // past "All accounts" to the one account
-    await until(() => ui.lastFrame()?.includes(`› @${USER}`));
+    await until(() => ui.lastFrame()?.includes('Add an account, or choose what to collect'));
+    for (let i = 0; i < 2; i += 1) { ui.stdin.write('\x1b[B'); await wait(80); } // past "Add a new account" and "All accounts"
+    await until(() => plain(ui.lastFrame()).includes(`› @${USER}`));
     ui.stdin.write('\r');
 
     // The run reaches the collector: both posts, their media and the comment are saved to this dataset.
@@ -119,9 +122,11 @@ test('the dashboard collects an account and stops a run on request', { timeout: 
     // A second run is stopped from the menu: it ends promptly and says so, leaving the saved work alone.
     await until(() => ui.lastFrame()?.includes('What would you like to do?'));
     await choose(ui, 'Collect posts and media');
-    await until(() => ui.lastFrame()?.includes('Which accounts should be collected?'));
-    ui.stdin.write('\x1b[B');
-    await until(() => ui.lastFrame()?.includes(`› @${USER}`));
+    await until(() => ui.lastFrame()?.includes('Add an account, or choose what to collect'));
+    // The list now says the account is fully collected, and when.
+    assert.match(plain(ui.lastFrame()), new RegExp(`@${USER} · 2 posts · all collected · (just now|\\d+ min ago)`));
+    for (let i = 0; i < 2; i += 1) { ui.stdin.write('\x1b[B'); await wait(80); }
+    await until(() => plain(ui.lastFrame()).includes(`› @${USER}`));
     ui.stdin.write('\r');
     await until(() => ui.lastFrame()?.includes('Stop current task'));
     await choose(ui, 'Stop current task');

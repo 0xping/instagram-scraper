@@ -124,14 +124,20 @@ test('dashboard menu adds an account with arrows and Enter', async () => {
       assert.match(ui.lastFrame(), /What would you like to do\?/);
       assert.ok(ui.lastFrame().split('\n').length <= 24, 'Home should fit a standard terminal height');
       ui.stdin.write('\x1b[B');
-      await until(() => ui.lastFrame()?.includes('› Add accounts to track'));
+      await until(() => ui.lastFrame()?.includes('› Collect posts and media'));
+      ui.stdin.write('\r');
+      // Collecting and adding are one flow: the list opens on "Add a new account".
+      await until(() => plain(ui.lastFrame()).includes('› Add a new account'));
+      assert.match(plain(ui.lastFrame()), /@brand · never collected/, 'each account shows whether it is collected');
       ui.stdin.write('\r');
       await until(() => ui.lastFrame()?.includes('Add Instagram accounts'));
       ui.stdin.write('newbrand');
       await until(() => ui.lastFrame()?.includes('newbrand'));
       ui.stdin.write('\r');
       await until(() => db.prepare("SELECT count(*) n FROM competitors WHERE username = 'newbrand'").get().n === 1);
-      assert.equal(db.prepare("SELECT count(*) n FROM competitors WHERE username = 'newbrand'").get().n, 1);
+      // Saving returns to the list, ready to collect what was just added.
+      await until(() => plain(ui.lastFrame()).includes('@newbrand'));
+      assert.match(plain(ui.lastFrame()), /Add an account, or choose what to collect/);
     } finally { ui.unmount(); }
   } finally {
     db.close();
@@ -154,7 +160,7 @@ test('export menu lists only accounts holding posts and exports the chosen one',
     const ui = render(createElement(App, { db, dataDir: dir, envPath: join(dir, '.env'), firstRun: false }));
     try {
       await until(() => ui.lastFrame()?.includes('Export data'));
-      for (const label of ['Add accounts to track', 'Collect posts and media', 'Review saved posts', 'Fix failed items', 'Export data']) {
+      for (const label of ['Collect posts and media', 'Review saved posts', 'Fix failed items', 'Export data']) {
         ui.stdin.write('\x1b[B');
         await until(() => ui.lastFrame()?.includes(`› ${label}`));
       }
@@ -199,7 +205,7 @@ test('post menu offers only the actions a post can perform', async () => {
     const ui = render(createElement(App, { db, dataDir: dir, envPath: join(dir, '.env'), firstRun: false }));
     try {
       await until(() => ui.lastFrame()?.includes('@brand'));
-      for (const label of ['Add accounts to track', 'Collect posts and media', 'Review saved posts']) {
+      for (const label of ['Collect posts and media', 'Review saved posts']) {
         ui.stdin.write('\x1b[B');
         await until(() => ui.lastFrame()?.includes(`› ${label}`));
       }

@@ -11,9 +11,9 @@ instagram-scraper
 
 ```text
 ┌ What would you like to do? ─────┐┌ Accounts (12) ───────────────────────┐
-│ › Collect posts and media       ││ @competitor1 · 437 posts saved        │
-│   Review saved posts            ││ @competitor2 · 2 need attention       │
-│   Export data                   ││ @competitor3 · 612 posts saved        │
+│ › Collect posts and media       ││ @competitor1 · 437 posts · all        │
+│   Review saved posts            ││   collected · 2 hours ago             │
+│   Export data                   ││ @competitor2 · 2 need attention       │
 │   Fix failed items              ││                                       │
 │   Settings                      ││ Latest activity · @competitor1        │
 │   Quit                          ││ Collecting · Post details             │
@@ -61,10 +61,9 @@ Requires Node.js 22.13+, about 1 GB of disk for the browser and FFmpeg, and an I
 
 1. `instagram-scraper`
 2. **Connect Instagram** — a browser window opens; log in as you normally would. The session is saved locally, and your password is never seen or stored by the tool.
-3. **Add accounts to track** — paste usernames or profile links.
-4. **Collect posts and media** — pick one account or all of them, then leave it running.
-5. **Review saved posts** — browse what was collected; photos, videos and frame folders open in your normal viewer.
-6. **Export data** — CSV and JSON in `exports/`.
+3. **Collect posts and media** — the list starts with *Add a new account* (paste usernames or profile links), then *All accounts*, then every account you track with its state: `@brand · 437 posts · all collected · 2 hours ago`, `never collected`, or `stopped early, run again`. Pick one and leave it running.
+4. **Review saved posts** — browse what was collected; photos, videos and frame folders open in your normal viewer.
+5. **Export data** — CSV and JSON in `exports/`.
 
 Data is stored in `~/instagram-scraper-data` by default. Set `INSTAGRAM_SCRAPER_DATA` to keep separate datasets.
 

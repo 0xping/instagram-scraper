@@ -11,12 +11,13 @@ import { saveSettings } from '../env-file.js';
 import { postDir } from '../media-files.js';
 import { openDataPath, openInstagramUrl } from '../open-path.js';
 import { redactLog } from '../logger.js';
-import { BrowseView, Footer, Header, HomeView, PostView, usePanelHeight, type BrowsePost } from './Screens.js';
+import { accountSummary, BrowseView, Footer, Header, HomeView, PostView, usePanelHeight, type BrowsePost } from './Screens.js';
 import { useCollector } from './useCollector.js';
 
 type Screen = 'first' | 'home' | 'choose' | 'add' | 'browse' | 'post' | 'export' | 'settings' | 'login' | 'hide' | 'quit';
 type TargetAction = 'collect' | 'browse' | 'retry' | 'hide';
 type Setting = 'service' | 'key' | 'server' | 'model' | 'comments' | 'fps' | 'headed';
+const ADD_ACCOUNT = 'Add a new account…';
 const LOCAL_WHISPER = 'http://127.0.0.1:8080/v1';
 const WHISPER_MODEL = 'large-v3-turbo';
 /** Plain names for the transcription services, and what each one needs saved. */
@@ -128,7 +129,6 @@ export function App({ db, dataDir, envPath, firstRun }: {
   const listHeight = Math.max(4, usePanelHeight(8) - 3); // rows a full-height chooser can show
   const homeActions = [
     { id: 'login', label: collector.sessionStatus === 'valid' ? 'Reconnect Instagram' : 'Connect Instagram' },
-    { id: 'add', label: 'Add accounts to track' },
     { id: 'collect', label: 'Collect posts and media' },
     { id: 'browse', label: 'Review saved posts' },
     { id: 'retry', label: 'Fix failed items' },
@@ -142,7 +142,8 @@ export function App({ db, dataDir, envPath, firstRun }: {
   // review or fix, so accounts without it are left out rather than offered and then found empty.
   const targetRows = targetAction === 'browse' ? rows.filter((row) => row.discovered > 0)
     : targetAction === 'retry' ? rows.filter((row) => row.failed > 0) : rows;
-  const choices = targetAction === 'collect' ? ['All accounts', ...targetRows.map((row) => `@${row.username}`)]
+  const choices = targetAction === 'collect'
+    ? [ADD_ACCOUNT, 'All accounts', ...targetRows.map((row) => `@${row.username} · ${accountSummary(row)}`)]
     : targetRows.map((row) => `@${row.username}`);
   const exportRows = rows.filter((row) => row.discovered > 0);
   const posts = useMemo(() => {
@@ -240,8 +241,8 @@ export function App({ db, dataDir, envPath, firstRun }: {
         if (action === 'login') { setScreen('login'); void collector.login().finally(goHome); }
         else if (action === 'add') { setDraft(''); setInputVersion((n) => n + 1); setScreen('add'); }
         else if (action === 'collect' || action === 'browse' || action === 'retry' || action === 'hide') {
-          if (!rows.length) { setNotice('Add an account first.'); return; }
-          if (action === 'collect' && collector.sessionStatus !== 'valid') { setNotice('Connect Instagram before collecting.'); return; }
+          // Collecting opens its own list, which can add an account first; Instagram is only needed to start.
+          if (!rows.length && action !== 'collect') { setNotice('Add an account first.'); return; }
           if (action === 'browse' && !rows.some((row) => row.discovered > 0)) { setNotice('No posts saved yet. Choose Collect posts and media first.'); return; }
           if (action === 'retry' && !rows.some((row) => row.failed > 0)) { setNotice('Nothing needs fixing right now.'); return; }
           setTargetAction(action);
@@ -258,8 +259,13 @@ export function App({ db, dataDir, envPath, firstRun }: {
       if (key.upArrow) setChoiceIndex(Math.max(0, choiceIndex - 1));
       else if (key.downArrow) setChoiceIndex(Math.min(choices.length - 1, choiceIndex + 1));
       else if (key.return) {
-        if (targetAction === 'collect' && choiceIndex === 0) { goHome(); void collector.scrape(['--all'], true); return; }
-        const row = targetRows[targetAction === 'collect' ? choiceIndex - 1 : choiceIndex];
+        if (targetAction === 'collect' && choiceIndex === 0) { setDraft(''); setInputVersion((n) => n + 1); setScreen('add'); return; }
+        if (targetAction === 'collect' && collector.sessionStatus !== 'valid') { setNotice('Connect Instagram before collecting.'); return; }
+        if (targetAction === 'collect' && choiceIndex === 1) {
+          if (!targetRows.length) { setNotice('Add an account first.'); return; }
+          goHome(); void collector.scrape(['--all'], true); return;
+        }
+        const row = targetRows[targetAction === 'collect' ? choiceIndex - 2 : choiceIndex];
         if (!row) return;
         setSelected(row.username);
         if (targetAction === 'collect') { goHome(); void collector.scrape([row.username], false); }
@@ -328,7 +334,7 @@ export function App({ db, dataDir, envPath, firstRun }: {
       <Text dimColor>{firstRun ? 'Your local settings are ready.' : 'Your settings are ready.'}</Text>
     </Box> : null}
     {screen === 'choose' ? <Box borderStyle="single" flexDirection="column" paddingX={1} flexGrow={1}>
-      <Text bold>{targetAction === 'collect' ? 'Which accounts should be collected?' : targetAction === 'browse' ? 'Which account would you like to review?'
+      <Text bold>{targetAction === 'collect' ? 'Add an account, or choose what to collect' : targetAction === 'browse' ? 'Which account would you like to review?'
         : targetAction === 'retry' ? 'Which account needs another try?' : 'Which account should be hidden?'}</Text>
       <Text dimColor>Choose with the arrow keys, then press Enter.</Text>
       {choices.slice(Math.max(0, choiceIndex - listHeight + 1), Math.max(0, choiceIndex - listHeight + 1) + listHeight).map((label, i) => {
@@ -342,8 +348,18 @@ export function App({ db, dataDir, envPath, firstRun }: {
     {screen === 'add' ? <Box borderStyle="single" flexDirection="column" paddingX={1} flexGrow={1}>
       <Text bold>Add Instagram accounts</Text>
       <Text>Enter usernames or profile links. Separate several with spaces or commas.</Text>
+      <Text dimColor>They are saved, and the list reopens so you can collect them.</Text>
       <TextInput key={inputVersion} defaultValue={draft} placeholder="@brand, @another" onChange={setDraft}
-        onSubmit={(value) => { try { collector.add(value); goHome(); } catch (error) { message(error); } }} />
+        onSubmit={(value) => {
+          try {
+            collector.add(value);
+            setDraft('');
+            // Back to the collect list, on the account just added, so it can be collected straight away.
+            setChoiceIndex(2);
+            setTargetAction('collect');
+            setScreen('choose');
+          } catch (error) { message(error); }
+        }} />
       {notice ? <Text color="yellow">{notice}</Text> : null}
     </Box> : null}
     {screen === 'browse' && selected ? <BrowseView username={selected} posts={posts} selected={postIndex}
