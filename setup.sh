@@ -20,6 +20,8 @@ title "Setup — press Enter to accept each default"
 DATA_DEFAULT="${INSTAGRAM_SCRAPER_DATA:-$HOME/instagram-scraper-data}"
 DATA_DIR="$(ask "Where should collected posts and media be stored?" "$DATA_DEFAULT")"
 mkdir -p "$DATA_DIR"
+DATA_DIR="$(cd "$DATA_DIR" && pwd)"   # store it absolute: the command runs from the app folder
+set_setting "DATA_DIR=$DATA_DIR"
 printf '%s\n' "$DATA_DIR" > "$APP/.data-dir"
 
 # 2. Transcription service.

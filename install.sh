@@ -46,6 +46,9 @@ say "Building"
 (cd "$APP" && npm run build >/dev/null)
 [ -f "$APP/.env" ] || { cp "$APP/.env.example" "$APP/.env"; chmod 600 "$APP/.env"; }
 
+DEFAULT_DATA="${INSTAGRAM_SCRAPER_DATA:-$HOME/instagram-scraper-data}"
+(cd "$APP" && node dist/cli.js settings-set "DATA_DIR=$DEFAULT_DATA" >/dev/null)
+printf '%s\n' "$DEFAULT_DATA" > "$APP/.data-dir"
 if [ "${INSTAGRAM_SCRAPER_NO_SETUP:-0}" != "1" ]; then
   bash "$APP/setup.sh" || say "Setup skipped; defaults kept. Run 'instagram-scraper setup' any time."
 fi
@@ -56,9 +59,8 @@ cat > "$BIN/instagram-scraper" <<LAUNCHER
 # Opens the dashboard. Collected data lives in \${INSTAGRAM_SCRAPER_DATA:-\$HOME/instagram-scraper-data}.
 set -e
 APP="$APP"
-# The folder chosen during setup, unless this run overrides it.
-CHOSEN="\$( [ -f "\$APP/.data-dir" ] && cat "\$APP/.data-dir" )"
-export DATA_DIR="\${INSTAGRAM_SCRAPER_DATA:-\${CHOSEN:-\$HOME/instagram-scraper-data}}"
+# The folder lives in .env (chosen during setup); INSTAGRAM_SCRAPER_DATA overrides it for one run.
+[ -n "\${INSTAGRAM_SCRAPER_DATA:-}" ] && export DATA_DIR="\$INSTAGRAM_SCRAPER_DATA"
 case "\${1:-}" in
   update)
     git -C "\$APP" pull --ff-only && (cd "\$APP" && npm ci --no-audit --no-fund && npm run build >/dev/null)
