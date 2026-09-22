@@ -54,25 +54,8 @@ if [ "${INSTAGRAM_SCRAPER_NO_SETUP:-0}" != "1" ]; then
 fi
 
 mkdir -p "$BIN"
-cat > "$BIN/instagram-scraper" <<LAUNCHER
-#!/bin/bash
-# Opens the dashboard. Collected data lives in \${INSTAGRAM_SCRAPER_DATA:-\$HOME/instagram-scraper-data}.
-set -e
-APP="$APP"
-# The folder lives in .env (chosen during setup); INSTAGRAM_SCRAPER_DATA overrides it for one run.
-[ -n "\${INSTAGRAM_SCRAPER_DATA:-}" ] && export DATA_DIR="\$INSTAGRAM_SCRAPER_DATA"
-case "\${1:-}" in
-  update)
-    git -C "\$APP" pull --ff-only && (cd "\$APP" && npm ci --no-audit --no-fund && npm run build >/dev/null)
-    echo "Updated."; exit 0 ;;
-  setup) exec bash "\$APP/setup.sh" ;;
-  uninstall) exec bash "\$APP/uninstall.sh" ;;
-  whisper) shift; exec bash "\$APP/whisper.sh" "\$@" ;;
-  cli) shift; cd "\$APP"; exec node dist/cli.js "\$@" ;;
-esac
-cd "\$APP"
-exec node dist/app/main.js "\$@"
-LAUNCHER
+# A thin wrapper on purpose: every command lives in bin/run.sh inside the app, so `update` refreshes them too.
+printf '#!/bin/bash\n# Thin wrapper: the real commands live in the app, so updates reach them.\nexec bash "%s/bin/run.sh" "$@"\n' "$APP" > "$BIN/instagram-scraper"
 chmod +x "$BIN/instagram-scraper"
 ln -sf "$BIN/instagram-scraper" "$BIN/igscrape"
 
