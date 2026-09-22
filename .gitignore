@@ -23,3 +23,6 @@ competitors.txt
 *.pdf:Zone.Identifier
 :memory:*
 PLAN-*.md
+.data-dir
+models/
+whisper.cpp/

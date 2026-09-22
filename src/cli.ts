@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { loadConfig } from './config.js';
+import { saveSettings } from './env-file.js';
 import { dataPaths, ensureDataDirs } from './paths.js';
 import { createLogger, redactLog } from './logger.js';
 import { acquireDatasetLock, migrate, openDatabase, recoverInterruptedJobs, registerCompetitors } from './db.js';
@@ -59,6 +60,8 @@ Commands:
                     Retryable failures under the attempt cap only, unless --include-permanent.
   export <username...> | --all [--format json|csv|all] [--out DIR] [--no-raw]
                     Write competitor data for analysis to data/exports/<username>/ (default: both formats)
+  settings-set KEY=value ...
+                    Write settings to .env the way the dashboard does (used by setup)
   help      Show this message`;
 
 async function main(): Promise<void> {
@@ -79,6 +82,19 @@ async function main(): Promise<void> {
   }
 }
 
+/** `settings-set KEY=value ...`: what the installer and setup use, through the same writer as the dashboard. */
+function settingsSetCommand(args: string[]): void {
+  if (!args.length) throw new Error('Usage: settings-set KEY=value [KEY=value ...]');
+  const changes: Record<string, string> = {};
+  for (const pair of args) {
+    const at = pair.indexOf('=');
+    if (at < 1) throw new Error(`Expected KEY=value, got: ${pair}`);
+    changes[pair.slice(0, at)] = pair.slice(at + 1);
+  }
+  saveSettings(resolve('.env'), changes);
+  process.stdout.write(`Saved: ${Object.keys(changes).join(', ')}\n`);
+}
+
 async function runCommand(args: string[]): Promise<void> {
   const command = args[0];
   if (command === 'help' || command === '--help' || command === undefined) {
@@ -96,6 +112,7 @@ async function runCommand(args: string[]): Promise<void> {
   if (command === 'scrape-comments') return scrapeCommentsCommand(args.slice(1));
   if (command === 'frames') return framesCommand(args.slice(1));
   if (command === 'transcripts') return transcriptsCommand(args.slice(1));
+  if (command === 'settings-set') return settingsSetCommand(args.slice(1));
   if (args.length !== 1 || !['init', 'status', 'competitors-import', 'competitors-list', 'instagram-login', 'instagram-status'].includes(command)) {
     throw new Error(`Unknown command.\n${usage}`);
   }

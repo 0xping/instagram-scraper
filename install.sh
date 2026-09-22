@@ -46,18 +46,27 @@ say "Building"
 (cd "$APP" && npm run build >/dev/null)
 [ -f "$APP/.env" ] || { cp "$APP/.env.example" "$APP/.env"; chmod 600 "$APP/.env"; }
 
+if [ "${INSTAGRAM_SCRAPER_NO_SETUP:-0}" != "1" ]; then
+  bash "$APP/setup.sh" || say "Setup skipped; defaults kept. Run 'instagram-scraper setup' any time."
+fi
+
 mkdir -p "$BIN"
 cat > "$BIN/instagram-scraper" <<LAUNCHER
 #!/bin/bash
 # Opens the dashboard. Collected data lives in \${INSTAGRAM_SCRAPER_DATA:-\$HOME/instagram-scraper-data}.
 set -e
 APP="$APP"
-export DATA_DIR="\${INSTAGRAM_SCRAPER_DATA:-\$HOME/instagram-scraper-data}"
-if [ "\${1:-}" = "update" ]; then
-  git -C "\$APP" pull --ff-only && (cd "\$APP" && npm ci --no-audit --no-fund && npm run build >/dev/null)
-  echo "Updated."; exit 0
-fi
-if [ "\${1:-}" = "cli" ]; then shift; cd "\$APP"; exec node dist/cli.js "\$@"; fi
+# The folder chosen during setup, unless this run overrides it.
+CHOSEN="\$( [ -f "\$APP/.data-dir" ] && cat "\$APP/.data-dir" )"
+export DATA_DIR="\${INSTAGRAM_SCRAPER_DATA:-\${CHOSEN:-\$HOME/instagram-scraper-data}}"
+case "\${1:-}" in
+  update)
+    git -C "\$APP" pull --ff-only && (cd "\$APP" && npm ci --no-audit --no-fund && npm run build >/dev/null)
+    echo "Updated."; exit 0 ;;
+  setup) exec bash "\$APP/setup.sh" ;;
+  whisper) shift; exec bash "\$APP/whisper.sh" "\$@" ;;
+  cli) shift; cd "\$APP"; exec node dist/cli.js "\$@" ;;
+esac
 cd "\$APP"
 exec node dist/app/main.js "\$@"
 LAUNCHER
@@ -77,9 +86,11 @@ cat <<DONE
     instagram-scraper        (short: igscrape)
 
   In the dashboard: connect Instagram, add accounts, then choose Collect posts and media.
-  Your data:   ${INSTAGRAM_SCRAPER_DATA:-$HOME/instagram-scraper-data}
-  Update:      instagram-scraper update
-  Old CLI:     instagram-scraper cli help
+  Your data:   $( [ -f "$APP/.data-dir" ] && cat "$APP/.data-dir" || echo "$HOME/instagram-scraper-data" )
+  Change settings: instagram-scraper setup
+  Local Whisper:   instagram-scraper whisper start|stop|status
+  Update:          instagram-scraper update
+  Command line:    instagram-scraper cli help
 
 $PATH_NOTE
 DONE
