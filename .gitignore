@@ -1,0 +1,25 @@
+node_modules/
+dist/
+data/
+# DATA_DIR=. writes these collector outputs at the repository root.
+raw/
+competitors/
+derived/
+exports/
+browser/
+debug/
+collector.sqlite*
+.env
+.env.*
+!.env.example
+*.log
+# Playwright storage state holds live Instagram session cookies; never commit, wherever DATA_DIR points
+instagram-state.json*
+*.storage-state.json
+
+# Your own research inputs and notes stay local; the repository ships competitors.example.txt instead.
+competitors.txt
+*.pdf
+*.pdf:Zone.Identifier
+:memory:*
+PLAN-*.md

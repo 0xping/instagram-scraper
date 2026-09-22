@@ -1,0 +1,56 @@
+{
+  "name": "instagram-competitor-collector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "tsc && node dist/cli.js",
+    "build": "tsc",
+    "start": "node dist/app/main.js",
+    "app": "node dist/app/main.js",
+    "cli": "node dist/cli.js",
+    "competitors:import": "tsc && node dist/cli.js competitors-import",
+    "competitors:list": "tsc && node dist/cli.js competitors-list",
+    "scrape": "tsc && node dist/cli.js scrape",
+    "scrape:all": "tsc && node dist/cli.js scrape --all",
+    "retry:failed": "tsc && node dist/cli.js retry-failed",
+    "export": "tsc && node dist/cli.js export",
+    "export:all": "tsc && node dist/cli.js export --all",
+    "status": "tsc && node dist/cli.js status",
+    "scrape:profile": "tsc && node dist/cli.js scrape-profile",
+    "discover": "tsc && node dist/cli.js discover",
+    "scrape:posts": "tsc && node dist/cli.js scrape-posts",
+    "scrape:comments": "tsc && node dist/cli.js scrape-comments",
+    "media": "tsc && node dist/cli.js media",
+    "reels": "tsc && node dist/cli.js reels",
+    "process:frames": "tsc && node dist/cli.js frames",
+    "process:transcripts": "tsc && node dist/cli.js transcripts",
+    "instagram:login": "tsc && node dist/cli.js instagram-login",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "validate:e2e": "npm run build && node tests/e2e/validate.mjs && node --test tests/e2e/app-collect.test.mjs"
+  },
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^18.0.1",
+    "ffmpeg-static": "^5.3.0",
+    "ink": "^7.1.1",
+    "playwright": "^1.63.0",
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.4",
+    "@types/react": "^19.3.0",
+    "eslint": "^10.11.0",
+    "ink-testing-library": "^4.0.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.1"
+  }
+}

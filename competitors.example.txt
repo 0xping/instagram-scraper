@@ -1,0 +1,6 @@
+# One Instagram account per line: username, @username, or a profile link.
+# Copy this file to competitors.txt, or add accounts in the dashboard (Add accounts to track).
+# Lines starting with # are ignored.
+@nike
+adidas
+https://www.instagram.com/newbalance/
