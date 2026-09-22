@@ -42,6 +42,13 @@ esac
 rm -f "$BIN/instagram-scraper" "$BIN/igscrape"
 rm -rf "$STATE"
 [ "$KEEP_DATA" = "0" ] && rm -rf "$DATA"
+
+# A checkout you work in (with its git history) is never deleted: only the command that points at it.
+STANDARD="${INSTAGRAM_SCRAPER_HOME:-$HOME/.local/share/instagram-scraper}"
+if [ -d "$APP/.git" ] && [ "$APP" != "$STANDARD" ]; then
+  printf '\nThe command is gone. %s looks like a folder you work in, with its own git history, so it was left alone.\nDelete it yourself if you want it gone.\n' "$APP" >&2
+  exit 0
+fi
 rm -rf "$APP"
 
 printf '\nRemoved. %s\n' "$( [ "$KEEP_DATA" = "1" ] && echo "Your data is still in $DATA" || echo "Data deleted." )" >&2

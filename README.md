@@ -61,7 +61,7 @@ Change any of it later in the dashboard under **Settings**, or run `instagram-sc
 
 **Whisper on this computer is optional and not bundled.** Choose it during setup (or run `instagram-scraper whisper install`) and the installer fetches whisper.cpp — Homebrew on macOS, built from source on Linux — plus the model you pick, then starts the server and points the collector at it. Afterwards: `instagram-scraper whisper start | stop | status`.
 
-Update later with `instagram-scraper update`.
+Update later with `instagram-scraper update`, and remove everything with `instagram-scraper uninstall` (your collected data is kept unless you confirm twice).
 
 **Windows**: download the repository, then double-click `Install.bat` once and `Start.bat` to run it.
 
