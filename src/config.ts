@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { config as loadEnv } from 'dotenv';
+import { dataPaths } from './paths.js';
 
 export interface AppConfig {
   dataDir: string;
@@ -10,6 +11,10 @@ export interface AppConfig {
     headed: boolean;
     navigationTimeoutMs: number;
     loginTimeoutMs: number;
+    /** Installed browser to drive; '' uses Playwright's bundled Chromium. */
+    channel: string;
+    /** Profile kept between runs; '' opens a throwaway one. */
+    profileDir: string;
   };
   discovery: {
     scrollDelayMs: number;
@@ -41,6 +46,10 @@ export function loadConfig(projectDir = process.cwd()): AppConfig {
       headed: envBoolean('BROWSER_HEADED', true),
       navigationTimeoutMs: envPositiveInt('NAVIGATION_TIMEOUT_MS', 30_000),
       loginTimeoutMs: envPositiveInt('LOGIN_TIMEOUT_MS', 600_000),
+      // Instagram's security check will not accept a correct answer in the bundled Chromium on macOS,
+      // and it distrusts a device it has never seen, so real Chrome and one lasting profile are the defaults.
+      channel: process.env.BROWSER_CHANNEL?.trim() ?? 'chrome',
+      profileDir: envBoolean('BROWSER_KEEP_PROFILE', true) ? dataPaths(resolve(projectDir, dataDir)).browserProfile : '',
     },
     discovery: {
       scrollDelayMs: envPositiveInt('DISCOVERY_SCROLL_DELAY_MS', 2_500),

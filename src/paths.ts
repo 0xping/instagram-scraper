@@ -9,6 +9,7 @@ export function dataPaths(dataDir: string) {
     derivedDir: join(dataDir, 'derived'),
     database: join(rawDir, 'collector.sqlite'),
     instagramState: join(dataDir, 'browser', 'instagram-state.json'),
+    browserProfile: join(dataDir, 'browser', 'profile'),
   };
 }
 

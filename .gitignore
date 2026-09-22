@@ -26,3 +26,4 @@ PLAN-*.md
 .data-dir
 models/
 whisper.cpp/
+.node/

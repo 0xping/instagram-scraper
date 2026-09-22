@@ -51,7 +51,7 @@ Everything lands in plain files and one SQLite database you can query, plus CSV 
 curl -fsSL https://raw.githubusercontent.com/0xping/instagram-scraper/main/install.sh | bash
 ```
 
-Installs Node.js if missing, downloads the browser it drives and FFmpeg, puts `instagram-scraper` (short: `igscrape`) on your PATH, and then **asks you a few questions**, each with a default you can accept with Enter:
+Works on a Mac straight out of the box, with no git, no Homebrew and no Node.js: everything it needs arrives over `curl`, Node.js included (unpacked inside the app folder, nothing system-wide, no password asked). Downloads the browser it drives and FFmpeg, puts `instagram-scraper` (short: `igscrape`) on your PATH, and then **asks you a few questions**, each with a default you can accept with Enter:
 
 - where collected data is stored
 - transcription: Groq, Whisper on this computer, OpenAI, or off
@@ -59,13 +59,15 @@ Installs Node.js if missing, downloads the browser it drives and FFmpeg, puts `i
 
 Change any of it later in the dashboard under **Settings**, or run `instagram-scraper setup` again.
 
-**Whisper on this computer is optional and not bundled.** Choose it during setup (or run `instagram-scraper whisper install`) and the installer fetches whisper.cpp — Homebrew on macOS, built from source on Linux — plus the model you pick, then starts the server and points the collector at it. Afterwards: `instagram-scraper whisper start | stop | status`.
+**Whisper on this computer is optional and not bundled.** Choose it during setup (or run `instagram-scraper whisper install`) and the installer fetches whisper.cpp — Homebrew on macOS, built from source on Linux — plus the model you pick. Building it is the one step that needs a compiler: on a new Mac it offers to install the command line tools and Homebrew first, and if you say no it says so and leaves transcription off rather than failing quietly. Groq needs none of that, then starts the server and points the collector at it. Afterwards: `instagram-scraper whisper start | stop | status`.
 
 Update later with `instagram-scraper update`, and remove everything with `instagram-scraper uninstall` (your collected data is kept unless you confirm twice).
 
+**macOS without a terminal**: download the repository, then double-click `Install.command` once and `Start.command` to run it. Both do exactly what the line above does, in the folder you downloaded.
+
 **Windows**: download the repository, then double-click `Install.bat` once and `Start.bat` to run it.
 
-Requires Node.js 22.13+, about 1 GB of disk for the browser and FFmpeg, and an Instagram account you log into yourself, in a browser window the tool opens.
+Needs about 1 GB of disk for the browser and FFmpeg, and an Instagram account you log into yourself. Node.js 22.13+ is required and installed for you if the computer has none. Google Chrome is not required, but Instagram's security check goes better with it — see [Instagram login](#instagram-login).
 
 ## Using it
 
@@ -112,7 +114,7 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-`.env` accepts `DATA_DIR` (default `./data`) and `LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`). Browser settings are `BROWSER_HEADED` (default `true`; `false` runs headless, see profile collection below), `NAVIGATION_TIMEOUT_MS` (default `30000`) and `LOGIN_TIMEOUT_MS` (how long `instagram:login` waits for you; default `600000`). Discovery settings are `DISCOVERY_SCROLL_DELAY_MS` (base pause after each scroll; default `2500`) and `DISCOVERY_MAX_IDLE_SCROLLS` (scrolls in a row with nothing new before the end is checked; default `5`). Relative data paths resolve from the directory where you run the CLI, and so does `competitors.txt`.
+`.env` accepts `DATA_DIR` (default `./data`) and `LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`). Browser settings are `BROWSER_HEADED` (default `true`; `false` runs headless, see profile collection below), `BROWSER_CHANNEL` (which installed browser to drive; default `chrome`, empty uses Playwright's bundled Chromium), `BROWSER_KEEP_PROFILE` (default `true`; keeps one profile in `<data>/browser/profile` so Instagram sees the same device each run), `NAVIGATION_TIMEOUT_MS` (default `30000`) and `LOGIN_TIMEOUT_MS` (how long `instagram:login` waits for you; default `600000`). Discovery settings are `DISCOVERY_SCROLL_DELAY_MS` (base pause after each scroll; default `2500`) and `DISCOVERY_MAX_IDLE_SCROLLS` (scrolls in a row with nothing new before the end is checked; default `5`). Relative data paths resolve from the directory where you run the CLI, and so does `competitors.txt`.
 
 ```sh
 npm run dev -- init
@@ -750,9 +752,27 @@ Then log in:
 npm run instagram:login
 ```
 
-This opens a visible Chromium window on the Instagram login page. Type your username and password yourself; the tool never reads, stores, or fills credentials. When Instagram shows the logged-in home page, the tool confirms it with a fresh page load, saves the session, and closes the browser. If you close the window early or `LOGIN_TIMEOUT_MS` passes, nothing is saved.
+This opens a visible window on the Instagram login page, driven by the Chrome you have installed (`BROWSER_CHANNEL=chrome`) and reusing one profile kept in `<data>/browser/profile` (`BROWSER_KEEP_PROFILE=true`). Both matter: Instagram's security check will not accept a correct answer in Playwright's bundled Chromium on macOS, and a profile it has never seen before is itself a reason to challenge you. With no Chrome installed it falls back to the bundled Chromium and says so. Type your username and password yourself; the tool never reads, stores, or fills credentials. When Instagram shows the logged-in home page, the tool confirms it with a fresh page load, saves the session, and closes the browser. If you close the window early or `LOGIN_TIMEOUT_MS` passes, nothing is saved.
 
-If Instagram shows a CAPTCHA, 2FA prompt, checkpoint, or suspicious-login confirmation, the tool logs a warning and waits while you complete it in the window. It does not touch or work around the challenge. Detection is by URL and page elements, not page text, so an unusual challenge page may go unannounced; it still will not be saved as logged in.
+If Instagram shows a CAPTCHA, 2FA prompt, checkpoint, or suspicious-login confirmation, the tool logs a warning and waits while you complete it in the window. It does not touch or work around the challenge.
+
+If that check keeps refusing an answer you know is correct, it is not the answer that is wrong: Instagram has flagged the browser, and the way through is to not automate the login at all. Log in to Instagram in Chrome, the way you normally would, and then:
+
+```sh
+instagram-scraper cli instagram-cookies    # or: npm run dev -- instagram-cookies
+```
+
+There is nothing to copy. It reads the cookies of the Chrome profile you are logged in with, straight from Chrome's own store, and checks them against the home page before replacing the session you already had. On macOS the system asks whether it may use your keychain — that box is macOS, and the answer is Allow. Chrome can stay open. If several Chrome profiles exist, it takes the one that is logged in and says which.
+
+Should that not be possible — Windows, a browser that is not Chrome, a profile it cannot read — hand the cookies over yourself instead:
+
+```sh
+instagram-scraper cli instagram-cookies --paste
+```
+
+Paste `sessionid`, `ds_user_id` and `csrftoken`, then press Ctrl-D. The quickest way to get all three at once: F12 → Network → click any instagram.com request → Request Headers → copy the whole `Cookie:` value. (`document.cookie` in the console will not do: `sessionid` is HttpOnly and never appears there.)
+
+Either way: a paste that is not a live session leaves the old one untouched, logging out in that browser ends the scraper's session too, and staying on the same internet connection matters — a session that suddenly appears from another country is challenged again. If a flag has already landed, leave the account alone for a day, open it on your phone, confirm the login was you, and try again. Detection is by URL and page elements, not page text, so an unusual challenge page may go unannounced; it still will not be saved as logged in.
 
 Check the saved session at any time:
 

@@ -101,7 +101,7 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
 
   const scrape = useCallback((targets: string[], batch: boolean): Promise<void> => work('Scrape', async (signal) => {
     const settings = config();
-    const browser = new BrowserManager({ headed: settings.browser.headed, navigationTimeoutMs: settings.browser.navigationTimeoutMs }, log);
+    const browser = new BrowserManager({ ...settings.browser }, log);
     browserRef.current = browser;
     const handle = await openCollector({ log, signal, config: settings, targets, browser });
     browserRef.current = handle.browser;
@@ -132,7 +132,7 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
     const competitors = resolveCompetitors(db, [target]);
     const stages = ['metadata', 'media', 'reels', 'frames', 'transcripts', 'comments'] as const;
     const needsBrowser = retryNeedsBrowser(db, competitors, stages, false);
-    const browser = needsBrowser ? new BrowserManager({ headed: settings.browser.headed, navigationTimeoutMs: settings.browser.navigationTimeoutMs }, log) : null;
+    const browser = needsBrowser ? new BrowserManager({ ...settings.browser }, log) : null;
     browserRef.current = browser;
     const handle = browser ? await openCollector({ log, signal, config: settings, targets: [target], browser }) : null;
     try {
@@ -146,7 +146,7 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
 
   const login = useCallback((): Promise<void> => work('Instagram login', async () => {
     const settings = config();
-    const browser = new BrowserManager({ headed: true, navigationTimeoutMs: settings.browser.navigationTimeoutMs }, log);
+    const browser = new BrowserManager({ ...settings.browser, headed: true }, log);
     browserRef.current = browser;
     try {
       const session = new InstagramSessionManager(browser, join(dataDir, 'browser', 'instagram-state.json'), settings.browser.loginTimeoutMs, log);
@@ -159,7 +159,7 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
 
   const verifySession = useCallback((): Promise<void> => work('Session check', async (signal) => {
     const settings = config();
-    const browser = new BrowserManager({ headed: settings.browser.headed, navigationTimeoutMs: settings.browser.navigationTimeoutMs }, log);
+    const browser = new BrowserManager({ ...settings.browser }, log);
     browserRef.current = browser;
     const handle = await openCollector({ log, signal, config: settings, targets: ['--all'], browser });
     setSessionStatus('valid');

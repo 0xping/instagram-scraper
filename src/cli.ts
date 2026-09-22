@@ -4,11 +4,13 @@ import { join, resolve } from 'node:path';
 import { loadConfig } from './config.js';
 import { saveSettings } from './env-file.js';
 import { dataPaths, ensureDataDirs } from './paths.js';
-import { createLogger, redactLog } from './logger.js';
+import { createLogger, redactLog, type Logger } from './logger.js';
 import { acquireDatasetLock, migrate, openDatabase, recoverInterruptedJobs, registerCompetitors } from './db.js';
 import { formatCompetitors, listCompetitors, parseCompetitorList } from './competitors.js';
 import { BrowserManager } from './browser.js';
 import { InstagramSessionManager } from './instagram-session.js';
+import { parseInstagramCookies, saveCookieSession } from './instagram-cookies.js';
+import { readChromeInstagramCookies } from './chrome-cookies.js';
 import { collectProfiles } from './profile-scraper.js';
 import { discoverBatch } from './discovery.js';
 import { scrapePostsBatch } from './post-scraper.js';
@@ -33,6 +35,9 @@ Commands:
   status    Per-competitor table: discovered, metadata, media, failed, last scrape
   instagram-login   Log in to Instagram manually in a browser and save the session
   instagram-status  Check that the saved Instagram session is still logged in
+  instagram-cookies [--paste]
+                    Connect using the Chrome you are already logged in with: it reads that
+                    profile's own cookies, nothing to copy. --paste asks for them instead.
   scrape-profile <username...> | --all
                     Collect public profile fields for registered competitors
   discover <username...> | --all [--full]
@@ -63,6 +68,34 @@ Commands:
   settings-set KEY=value ...
                     Write settings to .env the way the dashboard does (used by setup)
   help      Show this message`;
+
+/**
+ * Log in wherever you normally browse, then hand the cookies over: no automated browser touches the login,
+ * so Instagram's security check behaves as it does for you. The old session stays until these ones work.
+ */
+async function connectWithCookies(session: InstagramSessionManager, statePath: string, log: Logger, paste: boolean): Promise<void> {
+  let cookies;
+  if (paste) {
+    process.stdout.write('Paste the Instagram cookies (sessionid=...; ds_user_id=...; csrftoken=...), then press Ctrl-D:\n');
+    let pasted = '';
+    for await (const chunk of process.stdin) pasted += chunk as string;
+    cookies = parseInstagramCookies(pasted);
+  } else {
+    log.info('Reading the cookies of the Chrome you are logged in with. macOS asks permission for its keychain: choose Allow.');
+    const chrome = readChromeInstagramCookies();
+    cookies = chrome.cookies;
+    log.info(`Found an Instagram session in Chrome's "${chrome.profile}" profile.`);
+  }
+  const restore = saveCookieSession(statePath, cookies);
+  try {
+    const context = await session.open();
+    await context.close().catch(() => undefined);
+  } catch (error) {
+    restore();
+    throw new Error(`Those cookies are not a logged-in session. Open instagram.com in Chrome, check that you are logged in${paste ? ', and copy them again' : ', and run this again'}.`, { cause: error });
+  }
+  log.info(`Connected with ${cookies.length} cookie(s). The previous session was replaced.`);
+}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -113,7 +146,9 @@ async function runCommand(args: string[]): Promise<void> {
   if (command === 'frames') return framesCommand(args.slice(1));
   if (command === 'transcripts') return transcriptsCommand(args.slice(1));
   if (command === 'settings-set') return settingsSetCommand(args.slice(1));
-  if (args.length !== 1 || !['init', 'status', 'competitors-import', 'competitors-list', 'instagram-login', 'instagram-status'].includes(command)) {
+  const single = ['init', 'status', 'competitors-import', 'competitors-list', 'instagram-login', 'instagram-status', 'instagram-cookies'];
+  const paste = command === 'instagram-cookies' && args[1] === '--paste';
+  if (!single.includes(command) || args.length > (paste ? 2 : 1)) {
     throw new Error(`Unknown command.\n${usage}`);
   }
 
@@ -121,11 +156,11 @@ async function runCommand(args: string[]): Promise<void> {
   const log = createLogger(config.logLevel);
   const paths = dataPaths(config.dataDir);
 
-  if (command === 'instagram-login' || command === 'instagram-status') {
+  if (command === 'instagram-login' || command === 'instagram-status' || command === 'instagram-cookies') {
     // Login must be headed so a person can authenticate; status honors BROWSER_HEADED.
     const browser = new BrowserManager({
+      ...config.browser,
       headed: command === 'instagram-login' || config.browser.headed,
-      navigationTimeoutMs: config.browser.navigationTimeoutMs,
     }, log);
     const session = new InstagramSessionManager(browser, paths.instagramState, config.browser.loginTimeoutMs, log);
     const onSignal = (): void => {
@@ -135,6 +170,7 @@ async function runCommand(args: string[]): Promise<void> {
     process.once('SIGTERM', onSignal);
     try {
       if (command === 'instagram-login') await session.login();
+      else if (command === 'instagram-cookies') await connectWithCookies(session, paths.instagramState, log, paste);
       else {
         await session.open();
         log.info('Saved Instagram session is still logged in.');
@@ -187,7 +223,7 @@ async function withCompetitorBrowser(command: string, targets: string[], run: (c
   const paths = dataPaths(config.dataDir);
   if (!existsSync(paths.database)) throw new Error('Dataset not initialized. Run: npm run competitors:import');
 
-  const browser = new BrowserManager({ headed: config.browser.headed, navigationTimeoutMs: config.browser.navigationTimeoutMs }, log);
+  const browser = new BrowserManager({ ...config.browser }, log);
   const abort = new AbortController();
   const onSignal = (): void => {
     if (abort.signal.aborted) process.exit(130); // second Ctrl-C: stop now

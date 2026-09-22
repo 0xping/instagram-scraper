@@ -48,9 +48,7 @@ export async function openCollector(options: {
   const path = dataPaths(config.dataDir);
   if (!existsSync(path.database)) throw new Error('Dataset not initialized. Run: npm run competitors:import');
   const db = openDatabase(path.database);
-  const browser = options.browser ?? new BrowserManager({
-    headed: config.browser.headed, navigationTimeoutMs: config.browser.navigationTimeoutMs,
-  }, options.log);
+  const browser = options.browser ?? new BrowserManager({ ...config.browser }, options.log);
   try {
     migrate(db);
     const competitors = resolveCompetitors(db, options.targets ?? ['--all']);

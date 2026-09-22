@@ -20,6 +20,18 @@ const CHALLENGE_SELECTOR = [
 ].join(',');
 
 export type SessionState = 'authenticated' | 'logged_out' | 'challenge';
+/** What Playwright saves and restores: cookies, plus localStorage per origin. */
+export type StorageState = Awaited<ReturnType<BrowserContext['storageState']>>;
+
+/** Writes the session file atomically, readable only by the current user. */
+export function writeStateFile(statePath: string, state: StorageState): void {
+  mkdirSync(dirname(statePath), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(statePath), 0o700);
+  const tmp = `${statePath}.tmp`;
+  writeFileSync(tmp, JSON.stringify(state), { mode: 0o600, flush: true });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, statePath);
+}
 
 export class SessionExpiredError extends Error {}
 export class ManualInterventionError extends Error {}
@@ -27,7 +39,8 @@ export class ManualInterventionError extends Error {}
 const challengeMessage =
   'Instagram is showing a security challenge (CAPTCHA, 2FA, checkpoint, or suspicious-login confirmation). ' +
   'Manual intervention is required: run `npm run instagram:login`, complete it yourself in the browser window, then retry. ' +
-  'This tool never attempts to bypass it.';
+  'If the check refuses a correct answer, log in in your own browser instead and hand over its cookies: ' +
+  '`instagram-scraper cli instagram-cookies`. This tool never attempts to bypass a challenge.';
 
 export class InstagramSessionManager {
   constructor(
@@ -43,7 +56,8 @@ export class InstagramSessionManager {
    */
   async login(): Promise<void> {
     const context = await this.browser.newContext(existsSync(this.statePath) ? this.statePath : undefined);
-    const page = await context.newPage();
+    // A kept profile opens with a blank tab of its own; using it avoids a second, empty window.
+    const page = context.pages()[0] ?? await context.newPage();
     await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
     this.log.info(`Log in to Instagram in the browser window (waiting up to ${Math.round(this.loginTimeoutMs / 60000)} min). Credentials are never read or stored by this tool.`);
 
@@ -126,13 +140,7 @@ export class InstagramSessionManager {
 
   /** Writes the state file (cookies + localStorage) atomically, readable only by the current user. */
   async saveState(context: BrowserContext): Promise<void> {
-    const state = await context.storageState();
-    mkdirSync(dirname(this.statePath), { recursive: true, mode: 0o700 });
-    chmodSync(dirname(this.statePath), 0o700);
-    const tmp = `${this.statePath}.tmp`;
-    writeFileSync(tmp, JSON.stringify(state), { mode: 0o600, flush: true });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.statePath);
+    writeStateFile(this.statePath, await context.storageState());
   }
 }
 

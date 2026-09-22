@@ -17,7 +17,8 @@ title() { printf '\n\033[1;36m%s\033[0m\n' "$1" >&2; }
 title "Setup — press Enter to accept each default"
 
 # 1. Where collected data is kept.
-DATA_DEFAULT="${INSTAGRAM_SCRAPER_DATA:-$HOME/instagram-scraper-data}"
+CURRENT_DATA="$( [ -f "$APP/.data-dir" ] && cat "$APP/.data-dir" || true )"
+DATA_DEFAULT="${INSTAGRAM_SCRAPER_DATA:-${CURRENT_DATA:-$HOME/instagram-scraper-data}}"
 DATA_DIR="$(ask "Where should collected posts and media be stored?" "$DATA_DEFAULT")"
 mkdir -p "$DATA_DIR"
 DATA_DIR="$(cd "$DATA_DIR" && pwd)"   # store it absolute: the command runs from the app folder
@@ -36,7 +37,7 @@ case "$(ask "Choose 1-4" "1")" in
   1) KEY="$(ask_secret 'Paste your Groq API key (console.groq.com/keys)')"
      if [ -n "$KEY" ]; then set_setting "GROQ_API_KEY=$KEY" "TRANSCRIPTION_PROVIDER=groq"
      else echo "No key given; transcription left off." >&2; set_setting "TRANSCRIPTION_PROVIDER="; fi ;;
-  2) bash "$APP/whisper.sh" install <&3 || { echo "Whisper setup did not finish; transcription left off." >&2; set_setting "TRANSCRIPTION_PROVIDER="; } ;;
+  2) bash "$APP/whisper.sh" install <&3 || { echo "Whisper setup did not finish (the reason is above); transcription is off. Run 'instagram-scraper setup' again to pick Groq, or 'instagram-scraper whisper install' to retry." >&2; set_setting "TRANSCRIPTION_PROVIDER="; } ;;
   3) KEY="$(ask_secret 'Paste your OpenAI API key')"
      if [ -n "$KEY" ]; then set_setting "OPENAI_API_KEY=$KEY" "TRANSCRIPTION_PROVIDER=openai"
      else echo "No key given; transcription left off." >&2; set_setting "TRANSCRIPTION_PROVIDER="; fi ;;

@@ -1,6 +1,7 @@
 #!/bin/bash
+# Double-click to open the dashboard. run.sh knows where Node.js is, even the bundled one.
 cd "$(dirname "$0")"
-npm run app
+bash bin/run.sh
 status=$?
 if [ "$status" -ne 0 ]; then
   echo "The dashboard exited with an error."

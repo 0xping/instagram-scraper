@@ -12,8 +12,31 @@ die() { printf '\n\033[1;31mWhisper setup stopped:\033[0m %s\n' "$1" >&2; exit 1
 server_bin() { command -v whisper-server 2>/dev/null || { [ -x "$APP/whisper.cpp/build/bin/whisper-server" ] && echo "$APP/whisper.cpp/build/bin/whisper-server"; }; }
 model_file() { ls "$MODELS"/ggml-*.bin 2>/dev/null | head -1; }
 
+ask_yes() { local reply; printf '\n%s [yes]: ' "$1" >&2; IFS= read -r reply <&0 || reply=''; case "${reply:-yes}" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac; }
+
+# A new Mac has no compiler and no Homebrew, which is why this step used to be skipped without saying why.
+prepare_mac() {
+  if ! xcode-select -p >/dev/null 2>&1; then
+    say "macOS needs its command line tools first (one time, a few minutes)"
+    xcode-select --install >/dev/null 2>&1 || true
+    printf '\nFinish the install window macOS just opened, then press Enter here: ' >&2
+    IFS= read -r _ <&0 || true
+    xcode-select -p >/dev/null 2>&1 || die "The command line tools are still missing. Run 'xcode-select --install', then try again."
+  fi
+  command -v brew >/dev/null 2>&1 && return 0
+  say "Whisper on this computer is built with Homebrew, which you do not have yet"
+  ask_yes "Install Homebrew now? It asks for your Mac password" \
+    || die "Nothing installed. Choose Groq in 'instagram-scraper setup' instead: free, and nothing to build."
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [ -x "$brew_bin" ] && eval "$("$brew_bin" shellenv)" && break
+  done
+  command -v brew >/dev/null 2>&1 || die "Homebrew did not end up on your PATH. Open a new terminal and run: instagram-scraper whisper install"
+}
+
 install_server() {
   if [ -n "$(server_bin)" ]; then say "whisper.cpp is already installed"; return; fi
+  [ "$(uname -s)" = Darwin ] && prepare_mac
   if command -v brew >/dev/null 2>&1; then
     say "Installing whisper.cpp with Homebrew"
     brew install whisper-cpp
@@ -23,7 +46,7 @@ install_server() {
     cmake -S "$APP/whisper.cpp" -B "$APP/whisper.cpp/build" -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_SERVER=ON >/dev/null
     cmake --build "$APP/whisper.cpp/build" --config Release -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
   else
-    die "Needs Homebrew (macOS) or cmake and git (Linux). Install one, or use Groq instead."
+    die "Needs cmake and git. Install them, or choose Groq in 'instagram-scraper setup' instead."
   fi
   [ -n "$(server_bin)" ] || die "whisper-server was not found after installing."
 }

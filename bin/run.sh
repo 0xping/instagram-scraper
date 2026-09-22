@@ -4,6 +4,8 @@
 set -euo pipefail
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${INSTAGRAM_SCRAPER_BIN:-$HOME/.local/bin}"
+# The Node.js the installer unpacked here, for computers that had none of their own.
+if [ -x "$APP/.node/bin/node" ]; then export PATH="$APP/.node/bin:$PATH"; fi
 # The data folder comes from .env (chosen during setup); this overrides it for one run.
 [ -n "${INSTAGRAM_SCRAPER_DATA:-}" ] && export DATA_DIR="$INSTAGRAM_SCRAPER_DATA"
 
@@ -16,9 +18,18 @@ write_launcher() {
 
 case "${1:-}" in
   update)
-    git -C "$APP" pull --ff-only
-    (cd "$APP" && npm ci --no-audit --no-fund && npm run build >/dev/null)
-    write_launcher
+    # Installed without git (a new Mac has none), so the installer fetches the new code the same way it first did.
+    if [ -d "$APP/.git" ] && git --version >/dev/null 2>&1; then
+      git -C "$APP" pull --ff-only
+      (cd "$APP" && npm ci --no-audit --no-fund && npm run build >/dev/null)
+      write_launcher
+    else
+      # Run a copy: the download replaces install.sh underneath a script bash is still reading.
+      installer="$(mktemp)"; cp "$APP/install.sh" "$installer"
+      INSTAGRAM_SCRAPER_HOME="$APP" INSTAGRAM_SCRAPER_FORCE_DOWNLOAD=1 \
+        INSTAGRAM_SCRAPER_NO_SETUP=1 INSTAGRAM_SCRAPER_SKIP_BROWSER=1 bash "$installer"
+      rm -f "$installer"
+    fi
     echo "Updated." ;;
   setup) exec bash "$APP/setup.sh" ;;
   whisper) shift; exec bash "$APP/whisper.sh" "$@" ;;
