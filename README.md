@@ -51,7 +51,17 @@ Everything lands in plain files and one SQLite database you can query, plus CSV 
 curl -fsSL https://raw.githubusercontent.com/0xping/instagram-scraper/main/install.sh | bash
 ```
 
-Installs Node.js if missing, downloads the browser it drives and FFmpeg, and puts `instagram-scraper` (short: `igscrape`) on your PATH. Update later with `instagram-scraper update`.
+Installs Node.js if missing, downloads the browser it drives and FFmpeg, puts `instagram-scraper` (short: `igscrape`) on your PATH, and then **asks you a few questions**, each with a default you can accept with Enter:
+
+- where collected data is stored
+- transcription: Groq, Whisper on this computer, OpenAI, or off
+- comments saved per post, images saved per second of video, and whether the browser window shows
+
+Change any of it later in the dashboard under **Settings**, or run `instagram-scraper setup` again.
+
+**Whisper on this computer is optional and not bundled.** Choose it during setup (or run `instagram-scraper whisper install`) and the installer fetches whisper.cpp — Homebrew on macOS, built from source on Linux — plus the model you pick, then starts the server and points the collector at it. Afterwards: `instagram-scraper whisper start | stop | status`.
+
+Update later with `instagram-scraper update`.
 
 **Windows**: download the repository, then double-click `Install.bat` once and `Start.bat` to run it.
 
@@ -74,7 +84,7 @@ Open **Settings → Video speech transcription** and pick one:
 | Choice | Cost | Notes |
 | --- | --- | --- |
 | Groq | Free tier | Create a key at console.groq.com; fastest to set up |
-| Whisper on this computer | Free | Needs [whisper.cpp](https://github.com/ggml-org/whisper.cpp) running; nothing leaves your machine |
+| Whisper on this computer | Free | `instagram-scraper whisper install` sets up [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and the model; nothing leaves your machine |
 | OpenAI | Paid per minute | Standard `whisper-1` |
 | Another Whisper server | — | Any server speaking the same API |
 
