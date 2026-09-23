@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { dirname, join } from 'node:path';
 import type Database from 'better-sqlite3';
-import { Box, Text, useApp, useInput, usePaste } from 'ink';
+import { Box, Text, useApp, useInput, usePaste, useStdout } from 'ink';
 import { PasswordInput, Select, TextInput } from '@inkjs/ui';
 import { chromium } from 'playwright';
 import { existsSync } from 'node:fs';
@@ -16,7 +16,7 @@ import { useCollector } from './useCollector.js';
 
 type Screen = 'first' | 'home' | 'choose' | 'add' | 'browse' | 'post' | 'export' | 'settings' | 'login' | 'hide' | 'quit';
 type TargetAction = 'collect' | 'browse' | 'retry' | 'hide';
-type Setting = 'service' | 'key' | 'server' | 'model' | 'comments' | 'fps' | 'headed';
+type Setting = 'service' | 'key' | 'server' | 'model' | 'posts' | 'comments' | 'fps' | 'headed';
 const ADD_ACCOUNT = 'Add a new account…';
 const LOCAL_WHISPER = 'http://127.0.0.1:8080/v1';
 const WHISPER_MODEL = 'large-v3-turbo';
@@ -35,10 +35,12 @@ const serviceName = (): string => {
   return (process.env.TRANSCRIPTION_BASE_URL ?? '').includes('127.0.0.1') ? 'local' : 'custom';
 };
 const PAGE_SIZE = 12;
-type PostAction = 'media' | 'folder' | 'frames' | 'details' | 'instagram' | 'back';
+type PostAction = 'media' | 'folder' | 'frames' | 'full' | 'details' | 'instagram' | 'back';
+/** Lines of caption, and of speech, shown before "more": a long caption must not push the speech off screen. */
+const PREVIEW_LINES = 6;
 
 /** Only the actions this post can actually perform: a menu entry that cannot work is not offered. */
-function postActions(db: Database.Database, dataDir: string, post: BrowsePost | undefined): Array<{ id: PostAction; label: string }> {
+function postActions(db: Database.Database, dataDir: string, post: BrowsePost | undefined, text: 'short' | 'full' | null): Array<{ id: PostAction; label: string }> {
   if (!post) return [{ id: 'back', label: 'Back to posts' }];
   const media = db.prepare(`SELECT local_path FROM media WHERE post_id = ? AND download_status = 'complete'
     AND local_path IS NOT NULL ORDER BY position`).all(post.id) as Array<{ local_path: string }>;
@@ -50,6 +52,7 @@ function postActions(db: Database.Database, dataDir: string, post: BrowsePost | 
       label: video ? 'Play the video' : media.length > 1 ? `Open the ${media.length} photos` : 'Open the photo' }] : []),
     ...(frames ? [{ id: 'frames' as const, label: `Open the ${frames} video images` }] : []),
     ...(existsSync(folder) ? [{ id: 'folder' as const, label: 'Open this post\u2019s folder' }] : []),
+    ...(text ? [{ id: 'full' as const, label: text === 'short' ? 'Read the full caption and speech' : 'Show the short version' }] : []),
     { id: 'details', label: 'Scroll the details' },
     { id: 'instagram', label: 'Open on Instagram' },
     { id: 'back', label: 'Back to posts' },
@@ -65,7 +68,13 @@ function wrap(text: string, width = 44): string[] {
   });
 }
 
-function postDetail(db: Database.Database, post: BrowsePost | undefined): string[] {
+function section(title: string, text: string, width: number, full: boolean): string[] {
+  const lines = wrap(text, width);
+  if (full || lines.length <= PREVIEW_LINES) return [title, ...lines];
+  return [title, ...lines.slice(0, PREVIEW_LINES), `\u2026 ${lines.length - PREVIEW_LINES} more lines: choose Read the full caption and speech`];
+}
+
+function postDetail(db: Database.Database, post: BrowsePost | undefined, width = 44, full = false): string[] {
   if (!post) return ['Choose a post to see its details.'];
   const comments = db.prepare('SELECT username, text FROM comments WHERE post_id = ? ORDER BY likes_count DESC, id LIMIT 5')
     .all(post.id) as Array<{ username: string; text: string }>;
@@ -75,9 +84,9 @@ function postDetail(db: Database.Database, post: BrowsePost | undefined): string
   return [
     `${post.type} · ${post.shortcode}`, `Published: ${post.published_at ?? 'unknown'}`,
     `Likes: ${post.likes_count ?? '?'} · Comments: ${post.comments_count ?? '?'} · Views: ${post.views_count ?? '?'}`,
-    `Saved video images: ${frames.n}`, '', 'Caption', ...wrap(post.caption || 'No caption saved'), '',
-    'Video speech', ...wrap(transcript?.transcript || 'No speech transcript saved'), '',
-    'Popular comments', ...comments.flatMap((c) => wrap(`@${c.username}: ${c.text}`)),
+    `Saved video images: ${frames.n}`, '', ...section('Caption', post.caption || 'No caption saved', width, full), '',
+    ...section('Video speech', transcript?.transcript || 'No speech transcript saved', width, full), '',
+    'Popular comments', ...comments.flatMap((c) => wrap(`@${c.username}: ${c.text}`, width)),
   ];
 }
 
@@ -94,6 +103,8 @@ export function App({ db, dataDir, envPath, firstRun }: {
   const [postIndex, setPostIndex] = useState(0);
   const [postActionIndex, setPostActionIndex] = useState(0);
   const [detailScroll, setDetailScroll] = useState(0);
+  const [fullText, setFullText] = useState(false);
+  const { stdout } = useStdout();
   const [exportIndex, setExportIndex] = useState(0);
   const [confirmIndex, setConfirmIndex] = useState(0);
   const [settingIndex, setSettingIndex] = useState(0);
@@ -118,6 +129,7 @@ export function App({ db, dataDir, envPath, firstRun }: {
         { id: 'server' as const, label: 'Whisper server address', value: process.env.TRANSCRIPTION_BASE_URL || 'not set' },
         { id: 'model' as const, label: 'Whisper model', value: process.env.TRANSCRIPTION_MODEL || 'not set' },
       ] : []),
+      { id: 'posts', label: 'Newest posts collected per account', value: String(currentConfig.discovery.maxPosts ?? 'all') },
       { id: 'comments', label: 'Comments saved per post', value: String(currentConfig.commentLimit ?? 'all') },
       { id: 'fps', label: 'Images saved per video second', value: (1 / currentConfig.frameInterval).toFixed(2) },
       { id: 'headed', label: 'Show browser while collecting', value: currentConfig.browser.headed ? 'yes' : 'no' },
@@ -157,8 +169,11 @@ export function App({ db, dataDir, envPath, firstRun }: {
         limit: PAGE_SIZE, offset: page * PAGE_SIZE }) as BrowsePost[];
   }, [db, selected, page, screen]);
   const post = posts[postIndex];
-  const detail = useMemo(() => postDetail(db, post), [db, post]);
-  const actions = useMemo(() => postActions(db, dataDir, post), [db, dataDir, post]);
+  const width = screen === 'post' ? Math.max(30, (stdout.columns || 80) - 6) : 44;
+  const detail = useMemo(() => postDetail(db, post, width, screen === 'post' && fullText), [db, post, width, screen, fullText]);
+  const truncated = useMemo(() => screen === 'post' && postDetail(db, post, width, true).length !== postDetail(db, post, width).length,
+    [db, post, width, screen]);
+  const actions = useMemo(() => postActions(db, dataDir, post, truncated ? (fullText ? 'full' : 'short') : null), [db, dataDir, post, truncated, fullText]);
 
   useEffect(() => {
     if (!collector.state.competitors.some((c) => c.username === selected)) {
@@ -280,9 +295,11 @@ export function App({ db, dataDir, envPath, firstRun }: {
       } else if (key.upArrow) {
         if (postIndex > 0) { setPostIndex(postIndex - 1); setDetailScroll(0); }
         else if (page > 0) { setPage(page - 1); setPostIndex(PAGE_SIZE - 1); setDetailScroll(0); }
-      } else if (key.return && post) { setPostActionIndex(0); setScreen('post'); }
+      } else if (key.return && post) { setPostActionIndex(0); setDetailScroll(0); setFullText(false); setScreen('post'); }
     } else if (screen === 'post') {
-      if (key.upArrow) setPostActionIndex(Math.max(0, postActionIndex - 1));
+      if (key.pageDown) setDetailScroll(Math.min(Math.max(0, detail.length - 1), detailScroll + 8));
+      else if (key.pageUp) setDetailScroll(Math.max(0, detailScroll - 8));
+      else if (key.upArrow) setPostActionIndex(Math.max(0, postActionIndex - 1));
       else if (key.downArrow) setPostActionIndex(Math.min(actions.length - 1, postActionIndex + 1));
       else if (key.return && post) {
         const action = actions[Math.min(postActionIndex, actions.length - 1)]?.id;
@@ -293,7 +310,8 @@ export function App({ db, dataDir, envPath, firstRun }: {
         else if (action === 'frames') {
           const frame = db.prepare('SELECT image_path FROM reel_frames WHERE post_id = ? ORDER BY timestamp_seconds LIMIT 1').get(post.id) as { image_path: string } | undefined;
           open(frame ? dirname(dirname(frame.image_path)) : null);
-        } else if (action === 'details') setDetailScroll(detailScroll + 8 >= detail.length ? 0 : detailScroll + 8);
+        } else if (action === 'full') { setFullText(!fullText); setDetailScroll(0); }
+        else if (action === 'details') setDetailScroll(detailScroll + 8 >= detail.length ? 0 : detailScroll + 8);
         else if (action === 'instagram') void openInstagramUrl(post.url).catch(message);
         else setScreen('browse');
       }
@@ -318,8 +336,9 @@ export function App({ db, dataDir, envPath, firstRun }: {
 
   const footer = screen === 'first' ? 'Enter to continue'
     : screen === 'add' ? 'Type or paste names · Enter to save · Esc to go back'
-      : screen === 'login' ? 'Finish login in the browser · Esc to cancel'
-        : '↑↓ choose · Enter to continue · Esc to go back';
+      : screen === 'login' ? 'Connecting with your Chrome login; if that fails, finish login in the window · Esc to cancel'
+        : screen === 'post' ? '↑↓ choose · Enter to continue · PgUp/PgDn scroll the details · Esc to go back'
+          : '↑↓ choose · Enter to continue · Esc to go back';
 
   return <Box flexDirection="column" width="100%" height="100%">
     <Header session={collector.sessionStatus} running={collector.running} />
@@ -327,7 +346,7 @@ export function App({ db, dataDir, envPath, firstRun }: {
       actions={homeActions.map((action) => action.label)} actionIndex={Math.min(homeIndex, homeActions.length - 1)} /> : null}
     {screen === 'first' ? <Box borderStyle="single" flexDirection="column" paddingX={1} flexGrow={1}>
       <Text bold>Welcome to Instagram research</Text>
-      <Text>1. Connect Instagram in the next screen.</Text>
+      <Text>1. Log in to instagram.com in Chrome, then choose Connect Instagram.</Text>
       <Text>2. Add the accounts you want to track.</Text>
       <Text>3. Choose Collect posts and media.</Text>
       {!chromiumReady || !ffmpeg ? <Text color="yellow">Setup is incomplete. Run Install again before collecting.</Text> : null}
@@ -411,6 +430,8 @@ export function App({ db, dataDir, envPath, firstRun }: {
           TRANSCRIPTION_MODEL: process.env.TRANSCRIPTION_MODEL?.trim() || WHISPER_MODEL })} /> : null}
       {editing === 'model' ? <TextInput placeholder={WHISPER_MODEL} defaultValue={process.env.TRANSCRIPTION_MODEL || WHISPER_MODEL}
         onSubmit={(value) => save({ TRANSCRIPTION_MODEL: value.trim() })} /> : null}
+      {editing === 'posts' ? <TextInput placeholder="200 or all" defaultValue={String(currentConfig.discovery.maxPosts ?? 'all')}
+        onSubmit={(v) => { const value = v.trim().toLowerCase(); if (value !== 'all' && !/^[1-9]\d*$/.test(value)) message(new Error('Enter a whole number, or all')); else save({ POST_LIMIT: value }); }} /> : null}
       {editing === 'comments' ? <TextInput placeholder="100 or all" defaultValue={String(currentConfig.commentLimit ?? 'all')}
         onSubmit={(v) => save({ COMMENT_LIMIT: v })} /> : null}
       {editing === 'fps' ? <TextInput placeholder="1" defaultValue={String(1 / currentConfig.frameInterval)}
@@ -421,7 +442,7 @@ export function App({ db, dataDir, envPath, firstRun }: {
         ? <Text dimColor>Whisper on this computer needs the whisper.cpp server running. See the README.</Text> : null}
       {notice ? <Text color="yellow">{notice}</Text> : null}
     </Box> : null}
-    {screen === 'login' ? <Box borderStyle="single" paddingX={1}><Text>Sign in to Instagram in the browser window. Return here when it finishes.</Text></Box> : null}
+    {screen === 'login' ? <Box borderStyle="single" paddingX={1}><Text>Using the Instagram login of your Chrome. If none is found, a login window opens: sign in there, then return here.</Text></Box> : null}
     {screen === 'hide' || screen === 'quit' ? <Box borderStyle="single" flexDirection="column" paddingX={1}>
       <Text bold>{screen === 'hide' ? `Hide @${selected}?` : 'Collection is still running'}</Text>
       <Text>{screen === 'hide' ? 'Saved posts stay on this computer. Add this account again to restore it.' : 'Stopping waits for the current item to finish.'}</Text>

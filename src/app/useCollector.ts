@@ -8,6 +8,7 @@ import { loadConfig, type AppConfig } from '../config.js';
 import { hideCompetitor, registerCompetitors } from '../db.js';
 import { exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors } from '../runner.js';
 import { InstagramSessionManager } from '../instagram-session.js';
+import { connectWithCookies } from '../instagram-cookies.js';
 import { ManualInterventionError, SessionExpiredError } from '../instagram-session.js';
 import { redactLog, type Logger } from '../logger.js';
 import { formatPipelineSummary, pipelineTotals, type PipelineTotals } from '../pipeline.js';
@@ -144,17 +145,29 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
     }
   }), [work, db, log, config]);
 
-  const login = useCallback((): Promise<void> => work('Instagram login', async () => {
+  // Chrome's own cookies first: Instagram's security check never sees an automated login that way. Only when
+  // there is no logged-in Chrome to read (Windows, WSL, another browser) does a login window open instead.
+  const login = useCallback((): Promise<void> => work('Instagram login', async (signal) => {
     const settings = config();
-    const browser = new BrowserManager({ ...settings.browser, headed: true }, log);
-    browserRef.current = browser;
+    const statePath = join(dataDir, 'browser', 'instagram-state.json');
+    const attempt = async (headed: boolean, run: (session: InstagramSessionManager) => Promise<void>): Promise<void> => {
+      const browser = new BrowserManager({ ...settings.browser, headed }, log);
+      browserRef.current = browser;
+      try {
+        await run(new InstagramSessionManager(browser, statePath, settings.browser.loginTimeoutMs, log));
+      } finally {
+        await browser.close();
+      }
+    };
     try {
-      const session = new InstagramSessionManager(browser, join(dataDir, 'browser', 'instagram-state.json'), settings.browser.loginTimeoutMs, log);
-      await session.login();
-      setSessionStatus('valid');
-    } finally {
-      await browser.close();
+      await attempt(settings.browser.headed, (session) => connectWithCookies(session, statePath, log));
+    } catch (error) {
+      if (signal.aborted) throw error;
+      log.warn(`Chrome cookies: ${(error as Error).message}`);
+      log.info('Opening a login window instead. Log in there as you normally would.');
+      await attempt(true, (session) => session.login());
     }
+    setSessionStatus('valid');
   }), [work, log, dataDir, config]);
 
   const verifySession = useCallback((): Promise<void> => work('Session check', async (signal) => {

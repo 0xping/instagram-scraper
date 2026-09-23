@@ -4,13 +4,12 @@ import { join, resolve } from 'node:path';
 import { loadConfig } from './config.js';
 import { saveSettings } from './env-file.js';
 import { dataPaths, ensureDataDirs } from './paths.js';
-import { createLogger, redactLog, type Logger } from './logger.js';
+import { createLogger, redactLog } from './logger.js';
 import { acquireDatasetLock, migrate, openDatabase, recoverInterruptedJobs, registerCompetitors } from './db.js';
 import { formatCompetitors, listCompetitors, parseCompetitorList } from './competitors.js';
 import { BrowserManager } from './browser.js';
 import { InstagramSessionManager } from './instagram-session.js';
-import { parseInstagramCookies, saveCookieSession } from './instagram-cookies.js';
-import { readChromeInstagramCookies } from './chrome-cookies.js';
+import { connectWithCookies } from './instagram-cookies.js';
 import { collectProfiles } from './profile-scraper.js';
 import { discoverBatch } from './discovery.js';
 import { scrapePostsBatch } from './post-scraper.js';
@@ -40,8 +39,9 @@ Commands:
                     profile's own cookies, nothing to copy. --paste asks for them instead.
   scrape-profile <username...> | --all
                     Collect public profile fields for registered competitors
-  discover <username...> | --all [--full]
-                    Find post and Reel URLs on competitor profiles (resumable)
+  discover <username...> | --all [--full] [--post-limit N|all]
+                    Find post and Reel URLs on competitor profiles (resumable). --post-limit stops
+                    after the newest N posts, photos and Reels alike (default: POST_LIMIT, or all)
   scrape-posts <username...> | --all [--resume] [--force] [--limit N]
                     Extract fields from discovered posts (pending ones; --force refreshes complete ones)
   media <username...> | --all [--limit N] [--refresh-expired]
@@ -55,7 +55,7 @@ Commands:
   scrape-comments <username...> | --all [--limit N|all] [--force]
                     Optional: collect publicly visible comments (default 100 per post; resumable)
   scrape <username...> | --all [--recent-hours N] [--skip-media] [--skip-frames] [--skip-transcripts] [--skip-comments]
-         [--comment-limit N|all] [--force] [--resume] [--debug]
+         [--comment-limit N|all] [--post-limit N|all] [--force] [--resume] [--debug]
                     Full collector: session, profile, discovery, metadata, media, Reels, frames,
                     transcripts (if configured), comments. Resumes an unfinished run.
                     --all (npm run scrape:all): every competitor in turn; skips ones completed in the
@@ -68,34 +68,6 @@ Commands:
   settings-set KEY=value ...
                     Write settings to .env the way the dashboard does (used by setup)
   help      Show this message`;
-
-/**
- * Log in wherever you normally browse, then hand the cookies over: no automated browser touches the login,
- * so Instagram's security check behaves as it does for you. The old session stays until these ones work.
- */
-async function connectWithCookies(session: InstagramSessionManager, statePath: string, log: Logger, paste: boolean): Promise<void> {
-  let cookies;
-  if (paste) {
-    process.stdout.write('Paste the Instagram cookies (sessionid=...; ds_user_id=...; csrftoken=...), then press Ctrl-D:\n');
-    let pasted = '';
-    for await (const chunk of process.stdin) pasted += chunk as string;
-    cookies = parseInstagramCookies(pasted);
-  } else {
-    log.info('Reading the cookies of the Chrome you are logged in with. macOS asks permission for its keychain: choose Allow.');
-    const chrome = readChromeInstagramCookies();
-    cookies = chrome.cookies;
-    log.info(`Found an Instagram session in Chrome's "${chrome.profile}" profile.`);
-  }
-  const restore = saveCookieSession(statePath, cookies);
-  try {
-    const context = await session.open();
-    await context.close().catch(() => undefined);
-  } catch (error) {
-    restore();
-    throw new Error(`Those cookies are not a logged-in session. Open instagram.com in Chrome, check that you are logged in${paste ? ', and copy them again' : ', and run this again'}.`, { cause: error });
-  }
-  log.info(`Connected with ${cookies.length} cookie(s). The previous session was replaced.`);
-}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -170,7 +142,15 @@ async function runCommand(args: string[]): Promise<void> {
     process.once('SIGTERM', onSignal);
     try {
       if (command === 'instagram-login') await session.login();
-      else if (command === 'instagram-cookies') await connectWithCookies(session, paths.instagramState, log, paste);
+      else if (command === 'instagram-cookies') {
+        let pasted: string | undefined;
+        if (paste) {
+          process.stdout.write('Paste the Instagram cookies (sessionid=...; ds_user_id=...; csrftoken=...), then press Ctrl-D:\n');
+          pasted = '';
+          for await (const chunk of process.stdin) pasted += chunk as string;
+        }
+        await connectWithCookies(session, paths.instagramState, log, pasted);
+      }
       else {
         await session.open();
         log.info('Saved Instagram session is still logged in.');
@@ -281,6 +261,14 @@ function scrapePostsCommand(args: string[]): Promise<void> {
     if (stoppedBy) log.warn(`Stopped early: ${stoppedBy}. Rerun the same command to continue.`);
     return total('failed') === 0 && !stoppedBy;
   });
+}
+
+/** `--post-limit N|all` overrides POST_LIMIT for this run; loadConfig reads it, and .env never overrides it. */
+function takePostLimit(args: string[]): void {
+  const value = takeFlag(args, '--post-limit', true);
+  if (value === undefined) return;
+  if (value !== 'all' && !/^[1-9]\d*$/.test(String(value))) throw new Error('--post-limit needs a positive whole number or "all"');
+  process.env.POST_LIMIT = String(value);
 }
 
 /** Removes `flag` (and its value when `withValue`) from args; returns the value, true, or undefined. */
@@ -423,6 +411,7 @@ function scrapeCommand(input: string[]): Promise<void> {
     commentLimit: DEFAULT_COMMENT_LIMIT as number | null,
   };
   flag('--resume'); // always on: an unfinished run is continued unless --force
+  takePostLimit(args);
   if (flag('--debug')) process.env.LOG_LEVEL = 'debug';
   const limitArg = takeFlag(args, '--comment-limit', true);
   if (limitArg !== undefined) flags.commentLimit = limitArg === 'all' ? null : Number(limitArg);
@@ -431,7 +420,7 @@ function scrapeCommand(input: string[]): Promise<void> {
   const recentHours = recentArg === undefined ? 24 : Number(recentArg);
   if (!Number.isFinite(recentHours) || recentHours < 0) throw new Error('--recent-hours needs a number of hours (0 = rerun every competitor)');
   const unknown = args.find((arg) => arg.startsWith('--') && arg !== '--all');
-  if (unknown) throw new Error(`Unknown option ${unknown}. Use --skip-media, --skip-frames, --skip-transcripts, --skip-comments, --comment-limit N|all, --recent-hours N, --force, --resume, --debug, or --all.`);
+  if (unknown) throw new Error(`Unknown option ${unknown}. Use --skip-media, --skip-frames, --skip-transcripts, --skip-comments, --comment-limit N|all, --post-limit N|all, --recent-hours N, --force, --resume, --debug, or --all.`);
   const batch = args.includes('--all');
   return withCompetitorBrowser('scrape', args, async ({ db, context, session, competitors, config, log, signal }) => {
     const results = await scrapeCompetitors({ db, context, session, config, log, signal }, competitors, flags, {
@@ -573,7 +562,9 @@ async function transcriptsCommand(input: string[]): Promise<void> {
   });
 }
 
-function discover(args: string[]): Promise<void> {
+function discover(input: string[]): Promise<void> {
+  const args = [...input];
+  takePostLimit(args);
   const full = args.includes('--full');
   const targets = args.filter((arg) => arg !== '--full');
   return withCompetitorBrowser('discover', targets, async ({ db, context, session, competitors, config, log, signal }) => {

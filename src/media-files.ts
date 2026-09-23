@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, fstatSync, openSync, readSync, renameSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 
 /** Publish an already-flushed file and persist its directory entry before SQLite records it as complete. */
@@ -25,6 +25,14 @@ export function postDir(dataDir: string, username: string, shortcode: string): s
   const dir = resolve(base, username, 'posts', shortcode);
   if (!dir.startsWith(base + sep)) throw new Error(`Path escapes the data directory: ${dir}`);
   return dir;
+}
+
+/** Rewrites a small text file only when its content changed, atomically. */
+export function writeIfChanged(path: string, content: string): void {
+  if (existsSync(path) && readFileSync(path, 'utf8') === content) return;
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, content, 'utf8');
+  renameSync(tmp, path);
 }
 
 /** 001, 002, … by 0-based carousel position. */

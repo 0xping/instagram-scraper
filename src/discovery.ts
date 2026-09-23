@@ -24,6 +24,8 @@ export interface DiscoveredPost { shortcode: string; url: string; type: PostType
 export interface DiscoveryOptions extends ScrapeOptions {
   scrollDelayMs: number;
   maxIdleScrolls: number;
+  /** Stop once this many posts, newest first, have been seen in one walk; null or absent walks to the end. */
+  maxPosts?: number | null;
   /** Walk to the end even if an earlier run already did. */
   full: boolean;
 }
@@ -136,6 +138,8 @@ export interface LoopState {
   /** Distinct posts observed during this walk; historical rows do not prove today's grid is complete. */
   seenThisRun: number;
   profilePostsCount: number | null;
+  /** POST_LIMIT: enough posts seen this walk ends it. */
+  maxPosts?: number | null;
   aborted: boolean;
 }
 
@@ -153,6 +157,7 @@ export type LoopDecision =
 export function decide(state: LoopState): LoopDecision {
   if (state.aborted) return { action: 'stop', status: 'incomplete', reason: 'interrupted' };
   if (state.hasNextPage === false) return { action: 'stop', status: 'complete', reason: 'end_of_profile' };
+  if (state.maxPosts != null && state.seenThisRun >= state.maxPosts) return { action: 'stop', status: 'complete', reason: 'post_limit' };
   if (state.mode === 'incremental' && state.knownStreak >= KNOWN_STREAK_TO_STOP) {
     return { action: 'stop', status: 'complete', reason: 'caught_up' };
   }
@@ -299,7 +304,8 @@ export async function discoverPosts(
       finishJob(db, jobId, 'complete', `skipped: ${profile.status}`);
       return { username, mode: 'skipped', status: profile.status, endReason: profile.status, seen: 0, new: 0, known: 0, savedForCompetitor: savedBefore, profilePostsCount: postsCount };
     }
-    db.prepare('UPDATE scrape_jobs SET total_items = ? WHERE id = ?').run(postsCount, jobId);
+    const limit = options.maxPosts ?? null;
+    db.prepare('UPDATE scrape_jobs SET total_items = ? WHERE id = ?').run(limit !== null && (postsCount === null || postsCount > limit) ? limit : postsCount, jobId);
     checkpoint('in_progress', null);
 
     let idle = 0;
@@ -356,10 +362,12 @@ export async function discoverPosts(
         mode, scrolls, idle, maxIdle: options.maxIdleScrolls, recoveryUsed, hasNextPage, knownStreak,
         seenThisRun: counts.seen,
         // Rounded meta/DOM counts cannot establish that a full grid has been traversed.
-        profilePostsCount: profile.sources.postsCount === 'json' ? postsCount : null, aborted: options.signal?.aborted ?? false,
+        profilePostsCount: profile.sources.postsCount === 'json' ? postsCount : null, maxPosts: limit, aborted: options.signal?.aborted ?? false,
       });
       if (decision.action === 'stop') {
-        checkpoint(decision.status, decision.reason, decision.status === 'complete' ? new Date().toISOString() : undefined);
+        // A walk cut short by POST_LIMIT never reached the end, so it must not switch later runs to incremental
+        // mode: raising the limit then walks further instead of stopping at the first known posts.
+        checkpoint(decision.status, decision.reason, decision.status === 'complete' && decision.reason !== 'post_limit' ? new Date().toISOString() : undefined);
         finishJob(db, jobId, decision.status === 'complete' ? 'complete' : 'failed', decision.status === 'complete' ? null : decision.reason);
         const result = { username, mode, status: decision.status, endReason: decision.reason, ...counts, savedForCompetitor: countSaved(db, competitor.id), profilePostsCount: postsCount };
         if (decision.status === 'complete') {
@@ -456,6 +464,7 @@ function describeEnd(reason: string): string {
     caught_up: `reached ${KNOWN_STREAK_TO_STOP} already-known posts in a row`,
     all_posts_found: 'grid stopped growing and every post the profile counts is saved',
     no_posts: 'profile has no posts',
+    post_limit: 'reached POST_LIMIT, the newest posts to collect per account',
     loading_stalled: 'Instagram said more posts exist but stopped loading them; rerun to continue',
     posts_missing: 'grid stopped growing before reaching the profile post count; rerun to continue',
     end_unverified: 'grid stopped growing and the profile post count is unknown; rerun to confirm',

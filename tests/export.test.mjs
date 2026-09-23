@@ -71,7 +71,13 @@ test('export: normalized JSON with everything nested, paths not bytes, CSVs that
 
     const out = join(dir, 'exports');
     const files = exportCompetitor(db, { id: cid, username: 'brand' }, ['json', 'csv'], out, { dataDir: dir, raw: false });
-    assert.deepEqual(files.map((f) => f.slice(out.length + 1)), ['brand/brand.json', 'brand/posts.csv', 'brand/comments.csv', 'brand/metrics.csv']);
+    assert.deepEqual(files.map((f) => f.slice(out.length + 1)), ['brand/brand.json', 'brand/posts.jsonl', 'brand/README.md', 'brand/posts.csv', 'brand/comments.csv', 'brand/metrics.csv']);
+    const lines = readFileSync(join(out, 'brand/posts.jsonl'), 'utf8').trimEnd().split('\n').map((line) => JSON.parse(line));
+    assert.equal(lines.length, 2, 'one line per post');
+    assert.equal(lines[0].competitor.username, 'brand', 'each line stands on its own');
+    assert.equal(lines[0].transcript.text, 'hello world');
+    assert.equal('raw' in lines[0], false, 'no raw payload in agent lines');
+    assert.match(readFileSync(join(out, 'brand/README.md'), 'utf8'), /posts\.jsonl/);
     const json = readFileSync(join(out, 'brand/brand.json'), 'utf8');
     assert.ok(json.includes('مرحبا 🔥'), 'UTF-8 written as-is, not escaped');
     assert.ok(!/base64|data:image/.test(json), 'no embedded binaries');
@@ -88,6 +94,14 @@ test('export: normalized JSON with everything nested, paths not bytes, CSVs that
     assert.deepEqual(comments[1], ['brand', 'Reel0000001', '1', '', 'fan', 'love it, "really"', '3', '2026-01-02T01:00:00Z']);
     const metrics = parseCsv(readFileSync(join(out, 'brand/metrics.csv'), 'utf8'));
     assert.deepEqual(metrics.map((r) => r[3]), ['likes', '40', '50']);
+
+    // The data folder itself is agent-ready: posts.jsonl beside the posts, and a post.json in each post's folder.
+    const data = join(dir, 'competitors');
+    exportCompetitor(db, { id: cid, username: 'brand' }, ['json'], data, { dataDir: dir, raw: false, postFiles: true });
+    const postJson = JSON.parse(readFileSync(join(data, 'brand/posts/Reel0000001/post.json'), 'utf8'));
+    assert.equal(postJson.transcript.text, 'hello world', 'post.json carries what metadata.json lacks');
+    assert.equal(postJson.comments.length, 2);
+    assert.doesNotMatch(readFileSync(join(data, 'brand/README.md'), 'utf8'), /posts\.csv/, 'guide lists only files that exist');
 
     // Rerun overwrites in place (no duplicates, no leftover temp files).
     exportCompetitor(db, { id: cid, username: 'brand' }, ['csv'], out, { dataDir: dir, raw: false });

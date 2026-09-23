@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { writeStateFile, type StorageState } from './instagram-session.js';
+import { writeStateFile, type InstagramSessionManager, type StorageState } from './instagram-session.js';
+import { readChromeInstagramCookies } from './chrome-cookies.js';
+import type { Logger } from './logger.js';
 
 export interface InstagramCookie {
   name: string;
@@ -62,4 +64,29 @@ export function saveCookieSession(statePath: string, cookies: InstagramCookie[])
     if (previous === undefined) rmSync(statePath, { force: true });
     else writeStateFile(statePath, JSON.parse(previous) as StorageState);
   };
+}
+
+/**
+ * Log in wherever you normally browse, then hand the cookies over: no automated browser touches the login,
+ * so Instagram's security check behaves as it does for you. The old session stays until these ones work.
+ * `pasted` is cookie text the person copied; without it, the logged-in Chrome profile is read directly.
+ */
+export async function connectWithCookies(session: Pick<InstagramSessionManager, 'open'>, statePath: string, log: Logger, pasted?: string): Promise<void> {
+  let cookies;
+  if (pasted !== undefined) cookies = parseInstagramCookies(pasted);
+  else {
+    log.info('Reading the cookies of the Chrome you are logged in with. macOS asks permission for its keychain: choose Allow.');
+    const chrome = readChromeInstagramCookies();
+    cookies = chrome.cookies;
+    log.info(`Found an Instagram session in Chrome's "${chrome.profile}" profile.`);
+  }
+  const restore = saveCookieSession(statePath, cookies);
+  try {
+    const context = await session.open();
+    await context.close().catch(() => undefined);
+  } catch (error) {
+    restore();
+    throw new Error(`Those cookies are not a logged-in session. Open instagram.com in Chrome, check that you are logged in${pasted !== undefined ? ', and copy them again' : ', and run this again'}.`, { cause: error });
+  }
+  log.info(`Connected with ${cookies.length} cookie(s). The previous session was replaced.`);
 }

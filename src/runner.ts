@@ -14,6 +14,19 @@ import { dataPaths } from './paths.js';
 
 export interface Competitor { id: number; username: string }
 
+/**
+ * Keeps data/competitors/<username>/ ready for an AI agent after every run: posts.jsonl, README.md, the profile
+ * document, and a complete post.json in each post folder. A failure here never fails the collection itself.
+ */
+export function refreshAgentFiles(db: Database.Database, competitor: Competitor, dataDir: string, log: Logger): void {
+  try {
+    exportCompetitor(db, competitor, ['json'], join(dataDir, 'competitors'), { dataDir, raw: false, postFiles: true });
+  } catch (error) {
+    throwIfStorageError(error);
+    log.warn(`@${competitor.username}: could not refresh the agent files: ${(error as Error).message}`);
+  }
+}
+
 export function resolveCompetitors(db: Database.Database, targets: string[]): Competitor[] {
   const all = db.prepare('SELECT id, username FROM competitors WHERE archived_at IS NULL ORDER BY last_scraped_at IS NOT NULL, last_scraped_at, username').all() as Competitor[];
   if (targets.length === 1 && targets[0] === '--all') return all;
@@ -98,6 +111,7 @@ export async function scrapeCompetitors(
     try {
       const stages = collectorStages({ db, context, session, competitor, config, log, signal, flags });
       const run = await runPipeline(db, competitor, stages, { force: flags.force, log, signal, browserBlocked: blocked });
+      refreshAgentFiles(db, competitor, config.dataDir, log);
       const result = { username: competitor.username, status: run.status, jobId: run.jobId, run };
       results.push(result);
       options.onSummary?.(result);
@@ -130,6 +144,7 @@ export async function retryFailed(
     if (options.signal.aborted) break;
     try {
       const result = await retryCompetitor(db, browser, competitor, stages, options, blocked);
+      if (!options.dryRun) refreshAgentFiles(db, competitor, options.config.dataDir, options.log);
       rows.push(...result.rows);
       blocked = result.blocked;
     } catch (error) {

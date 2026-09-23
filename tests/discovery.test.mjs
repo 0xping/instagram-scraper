@@ -54,6 +54,12 @@ test('parseTimelineResponse reads the user grid and ignores the home feed', () =
 
 const base = { mode: 'full', scrolls: 10, idle: 0, maxIdle: 5, recoveryUsed: false, hasNextPage: null, knownStreak: 0, seenThisRun: 100, profilePostsCount: 200, aborted: false };
 
+test('decide: POST_LIMIT ends the walk once enough posts are seen, not before', () => {
+  assert.deepEqual(decide({ ...base, seenThisRun: 100, maxPosts: 100 }), { action: 'stop', status: 'complete', reason: 'post_limit' });
+  assert.deepEqual(decide({ ...base, seenThisRun: 99, maxPosts: 100 }), { action: 'continue' });
+  assert.deepEqual(decide({ ...base, maxPosts: null }), { action: 'continue' });
+});
+
 test('decide never ends on a single quiet scroll', () => {
   for (let idle = 1; idle < 5; idle += 1) assert.deepEqual(decide({ ...base, idle }), { action: 'continue' });
 });

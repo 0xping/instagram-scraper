@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, fsyncSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, fsyncSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -7,7 +7,7 @@ import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import type Database from 'better-sqlite3';
 import { throwIfStorageError } from './db.js';
 import type { Logger } from './logger.js';
-import { checkMediaFile, commitMediaFile, isExpired, itemStem, postDir, relativeToData, urlExpiry, type FileFormat } from './media-files.js';
+import { checkMediaFile, commitMediaFile, isExpired, writeIfChanged, itemStem, postDir, relativeToData, urlExpiry, type FileFormat } from './media-files.js';
 import { delay } from './profile-scraper.js';
 
 const ATTEMPTS_PER_RUN = 3;
@@ -328,13 +328,6 @@ function hashFile(path: string): Promise<string> {
 }
 
 /** Atomic small-file write that leaves the file (and its mtime) alone when the content is unchanged. */
-function writeIfChanged(path: string, content: string): void {
-  if (existsSync(path) && readFileSync(path, 'utf8') === content) return;
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, content, 'utf8');
-  renameSync(tmp, path);
-}
-
 /** metadata.json: the post's normalized fields, its media files, and Instagram's untouched media object. */
 function metadataSnapshot(db: Database.Database, post: PostRow, dataDir: string, dir: string) {
   const row = db.prepare('SELECT * FROM posts WHERE id = ?').get(post.id) as Record<string, unknown>;

@@ -19,6 +19,8 @@ export interface AppConfig {
   discovery: {
     scrollDelayMs: number;
     maxIdleScrolls: number;
+    /** Newest posts (photos and Reels alike) to find per account; null walks the whole profile. */
+    maxPosts: number | null;
   };
   /** Safety limits for `scrape:comments`, per post. They apply even with `--limit all`. */
   comments: {
@@ -54,6 +56,7 @@ export function loadConfig(projectDir = process.cwd()): AppConfig {
     discovery: {
       scrollDelayMs: envPositiveInt('DISCOVERY_SCROLL_DELAY_MS', 2_500),
       maxIdleScrolls: envPositiveInt('DISCOVERY_MAX_IDLE_SCROLLS', 5),
+      maxPosts: ['', 'all'].includes(process.env.POST_LIMIT?.trim() ?? '') ? null : envPositiveInt('POST_LIMIT', 1),
     },
     comments: {
       maxRounds: envPositiveInt('COMMENTS_MAX_ROUNDS', 60),

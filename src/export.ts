@@ -4,6 +4,8 @@
 //   data/exports/<username>/posts.csv         one row per post
 //   data/exports/<username>/comments.csv      one row per comment
 //   data/exports/<username>/metrics.csv       one row per metrics observation (engagement over time)
+//   data/exports/<username>/posts.jsonl       one self-contained post per line, for AI agents and pipelines
+//   data/exports/<username>/README.md         what every file and field means, for whoever reads the export next
 //
 // Files are referenced by path (relative to DATA_DIR, given in export.data_dir), never embedded.
 
@@ -11,6 +13,7 @@ import { closeSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from 'n
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { normalizeUsername } from './competitors.js';
+import { postDir, writeIfChanged } from './media-files.js';
 
 export const EXPORT_SCHEMA_VERSION = 1;
 export type ExportFormat = 'json' | 'csv';
@@ -44,6 +47,8 @@ export interface ExportOptions {
   dataDir: string;
   /** Include Instagram's original payload per post (`raw`); large, and not needed for most analysis. */
   raw: boolean;
+  /** Also write each owned post's complete record as post.json into its folder under data/competitors/. */
+  postFiles?: boolean;
 }
 
 /** In-memory document for callers that need one; the CLI below writes one post at a time. */
@@ -156,6 +161,46 @@ export function csvTables(doc: ExportDoc): Record<'posts' | 'comments' | 'metric
   };
 }
 
+// ---- Guide for agents ------------------------------------------------------------------------------
+
+/** Written next to the data so an agent handed only this folder knows what it holds. Facts only, no analysis. */
+export function exportGuide(doc: ExportDoc, options: { csv: boolean; postFiles: boolean } = { csv: true, postFiles: false }): string {
+  const e = doc.export as Row;
+  const c = doc.competitor as Row;
+  return `# Instagram export: @${String(c.username)}
+
+Collected source data for later analysis. Nothing here is analysed or scored: every value is what Instagram showed
+when it was collected. Exported ${String(e.exported_at)}, schema version ${String(e.schema_version)}.
+
+## Files
+
+- \`posts.jsonl\`: start here. One post per line, each a complete JSON object: caption, hashtags, metrics and their
+  history, media files, Reel details, speech transcript with timestamps, video frame images, and comments. Every line
+  also carries \`competitor\` (username and follower count at export), so a line can be read on its own.
+- \`${String(c.username)}.json\`: the same posts in one document, under the account profile. Includes Instagram's
+  original payload per post as \`raw\` when it was exported with it.
+${options.csv ? '- `posts.csv`, `comments.csv`, `metrics.csv`: flat tables of the same data for spreadsheets and SQL.\n' : ''}${options.postFiles
+    ? '- `posts/<shortcode>/post.json`: the same record as that post\'s line in `posts.jsonl`, next to its photos, video\n  (`media/`), video frames and `caption.txt`. `metadata.json` there is the raw collection snapshot; prefer `post.json`.\n'
+    : ''}
+## Reading the fields
+
+- File paths (\`media[].local_path\`, \`frames[].path\`, \`thumbnail_path\`) are relative to the data folder
+  \`${String(e.data_dir)}\`. Photos and videos are the originals; frames are JPEG stills of Reels, in time order.
+- \`metrics\` holds the latest likes, comments, views and plays. \`metrics.history\` lists every observation with
+  \`observed_at\`, so growth over time is visible. \`null\` means Instagram did not show the number (for example hidden likes).
+- \`published_at\`, \`observed_at\` and other times are ISO 8601 in UTC.
+- \`type\` is \`image\`, \`carousel\` or \`reel\`. \`reel\` is null for other types.
+- \`transcript\` is null when there is no transcript; \`transcript.segments\` has start and end seconds per phrase.
+- \`comments\` are the publicly visible comments collected, up to the configured limit per post; \`parent_id\` marks a reply.
+  \`status.comments_completion\` says whether all of them were collected.
+- \`status\` records how far each collection step got for the post. A post with \`availability\` other than \`available\`
+  may have empty fields.
+- Only posts collected so far are included. If POST_LIMIT was set, only the newest posts of the account were collected.
+
+The account profile (bio, followers, following, post count) is in \`${String(c.username)}.json\` under \`competitor\`.
+`;
+}
+
 // ---- Files ---------------------------------------------------------------------------------------
 
 /** Writes the requested formats into `<outDir>/<username>/` and returns the file paths. */
@@ -182,15 +227,31 @@ export function exportCompetitor(db: Database.Database, competitor: { id: number
       open(jsonName);
       write(jsonName, `{\n  "export": ${JSON.stringify(doc.export)},\n  "competitor": ${JSON.stringify(doc.competitor)},\n  "posts": [\n`);
     }
+    if (formats.includes('json')) {
+      open('posts.jsonl');
+      open('README.md');
+      write('README.md', exportGuide(doc, { csv: formats.includes('csv'), postFiles: options.postFiles ?? false }));
+    }
     if (formats.includes('csv')) {
       for (const [name, header] of Object.entries(csvTables(doc))) { open(`${name}.csv`); write(`${name}.csv`, header); }
     }
-    const ids = db.prepare(`SELECT p.id FROM posts p WHERE ${owned} ORDER BY p.published_at IS NULL, p.published_at DESC, p.id`);
+    const context = { username: (doc.competitor as Row).username, followers_count: (doc.competitor as Row).followers_count };
+    const ids = db.prepare(`SELECT p.id, p.shortcode, p.competitor_id AS ownerId FROM posts p WHERE ${owned} ORDER BY p.published_at IS NULL, p.published_at DESC, p.id`);
     let first = true;
     // Bound memory by one post, even when the competitor has years of raw payloads and comments.
-    for (const row of ids.iterate({ cid: competitor.id }) as Iterable<{ id: number }>) {
+    for (const row of ids.iterate({ cid: competitor.id }) as Iterable<{ id: number; shortcode: string; ownerId: number }>) {
       const part = buildCompetitorExport(db, competitor.id, options, row.id);
-      write(jsonName, `${first ? '' : ',\n'}${JSON.stringify((part.posts as Row[])[0], null, 2)}`);
+      const post = (part.posts as Row[])[0]!;
+      write(jsonName, `${first ? '' : ',\n'}${JSON.stringify(post, null, 2)}`);
+      // Agents read these lines whole; the raw payload would crowd out the content.
+      const line = JSON.stringify({ competitor: context, ...post, raw: undefined });
+      write('posts.jsonl', `${line}\n`);
+      // A collab lives in its owner's folder; that owner's own run writes it there.
+      if (options.postFiles && row.ownerId === competitor.id) {
+        const folder = postDir(options.dataDir, competitor.username, row.shortcode);
+        mkdirSync(folder, { recursive: true });
+        writeIfChanged(join(folder, 'post.json'), `${JSON.stringify(JSON.parse(line), null, 2)}\n`);
+      }
       first = false;
       if (formats.includes('csv')) {
         for (const [name, table] of Object.entries(csvTables(part))) write(`${name}.csv`, table.slice(table.indexOf('\r\n') + 2));

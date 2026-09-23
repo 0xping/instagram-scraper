@@ -55,7 +55,7 @@ Works on a Mac straight out of the box, with no git, no Homebrew and no Node.js:
 
 - where collected data is stored
 - transcription: Groq, Whisper on this computer, OpenAI, or off
-- comments saved per post, images saved per second of video, and whether the browser window shows
+- the newest posts to collect per account (photos and Reels alike; `all` by default), comments saved per post, images saved per second of video, and whether the browser window shows
 
 Change any of it later in the dashboard under **Settings**, or run `instagram-scraper setup` again.
 
@@ -72,12 +72,33 @@ Needs about 1 GB of disk for the browser and FFmpeg, and an Instagram account yo
 ## Using it
 
 1. `instagram-scraper`
-2. **Connect Instagram** — a browser window opens; log in as you normally would. The session is saved locally, and your password is never seen or stored by the tool.
+2. **Connect Instagram** — log in to instagram.com in Chrome first, as you normally would. Connect reads that login from Chrome (macOS asks for keychain access: choose Allow), so Instagram's security check never sees an automated login. With no logged-in Chrome to read (Windows, WSL, another browser) a login window opens instead. The session is saved locally, and your password is never seen or stored by the tool.
 3. **Collect posts and media** — the list starts with *Add a new account* (paste usernames or profile links), then *All accounts*, then every account you track with its state: `@brand · 437 posts · all collected · 2 hours ago`, `never collected`, or `stopped early, run again`. Pick one and leave it running.
 4. **Review saved posts** — browse what was collected; photos, videos and frame folders open in your normal viewer.
 5. **Export data** — CSV and JSON in `exports/`.
 
+Accounts with thousands of posts: set **Settings → Newest posts collected per account** (or `POST_LIMIT`, or `scrape --post-limit N`) and discovery stops after the newest N, photos and Reels alike. Pinned posts sit at the top of the grid and count toward N. Raising the limit later walks further down on the next run; `all` walks the whole profile.
+
 Data is stored in `~/instagram-scraper-data` by default. Set `INSTAGRAM_SCRAPER_DATA` to keep separate datasets.
+
+### Handing the data to an AI agent
+
+Point the agent at the data folder itself; no export step is needed. After every collection or fix, each account folder is brought up to date:
+
+```text
+competitors/<account>/
+  README.md                 what every file and field means: give the agent this first
+  posts.jsonl               one complete post per line: caption, hashtags, metrics and their history,
+                            transcript with timestamps, comments, media and frame paths
+  <account>.json            the account profile (bio, followers) with the same posts
+  posts/<shortcode>/
+    post.json               that post's complete record, the same as its posts.jsonl line
+    media/                  photos, video, thumbnail
+    frames/                 one image per second of video, for vision models
+    caption.txt
+```
+
+The tool stores and describes; it does no analysis. **Export data** is still there for CSV files or a copy somewhere else.
 
 ### Transcripts
 
@@ -270,6 +291,8 @@ posts[]      newest first
   status       availability and each stage's status
   raw          Instagram's original post payload (omit with --no-raw; it is most of the file's size)
 ```
+
+**`posts.jsonl`** is the file to hand an AI agent (the data folder carries an up-to-date copy too, see [Handing the data to an AI agent](#handing-the-data-to-an-ai-agent)): the same post objects, one per line, without `raw`, each carrying `competitor` (username and follower count at export) so any line stands on its own. **`README.md`** next to it explains every file and field for whoever reads the export next. Both are written with the JSON format. The export only stores and describes; it computes no scores or analysis.
 
 **CSV** (UTF-8, no byte-order mark; RFC 4180: comma-separated, CRLF rows, fields quoted when they hold a comma, quote or newline, quotes doubled). Every file starts with a `competitor` column, so exports can be concatenated.
 
@@ -752,7 +775,7 @@ Then log in:
 npm run instagram:login
 ```
 
-This opens a visible window on the Instagram login page, driven by the Chrome you have installed (`BROWSER_CHANNEL=chrome`) and reusing one profile kept in `<data>/browser/profile` (`BROWSER_KEEP_PROFILE=true`). Both matter: Instagram's security check will not accept a correct answer in Playwright's bundled Chromium on macOS, and a profile it has never seen before is itself a reason to challenge you. With no Chrome installed it falls back to the bundled Chromium and says so. Type your username and password yourself; the tool never reads, stores, or fills credentials. When Instagram shows the logged-in home page, the tool confirms it with a fresh page load, saves the session, and closes the browser. If you close the window early or `LOGIN_TIMEOUT_MS` passes, nothing is saved.
+The dashboard's **Connect Instagram** tries the Chrome cookies described below first and falls back to this login window. From the command line, this opens a visible window on the Instagram login page, driven by the Chrome you have installed (`BROWSER_CHANNEL=chrome`) and reusing one profile kept in `<data>/browser/profile` (`BROWSER_KEEP_PROFILE=true`). Both matter: Instagram's security check will not accept a correct answer in Playwright's bundled Chromium on macOS, and a profile it has never seen before is itself a reason to challenge you. With no Chrome installed it falls back to the bundled Chromium and says so. Type your username and password yourself; the tool never reads, stores, or fills credentials. When Instagram shows the logged-in home page, the tool confirms it with a fresh page load, saves the session, and closes the browser. If you close the window early or `LOGIN_TIMEOUT_MS` passes, nothing is saved.
 
 If Instagram shows a CAPTCHA, 2FA prompt, checkpoint, or suspicious-login confirmation, the tool logs a warning and waits while you complete it in the window. It does not touch or work around the challenge.
 
