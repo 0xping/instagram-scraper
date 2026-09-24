@@ -14,9 +14,9 @@ import { redactLog } from '../logger.js';
 import { accountSummary, BrowseView, Footer, Header, HomeView, PostView, usePanelHeight, type BrowsePost } from './Screens.js';
 import { useCollector } from './useCollector.js';
 
-type Screen = 'first' | 'home' | 'choose' | 'add' | 'browse' | 'post' | 'export' | 'settings' | 'login' | 'hide' | 'quit';
+type Screen = 'first' | 'home' | 'choose' | 'add' | 'browse' | 'post' | 'export' | 'settings' | 'login' | 'hide' | 'quit' | 'limit';
 type TargetAction = 'collect' | 'browse' | 'retry' | 'hide';
-type Setting = 'service' | 'key' | 'server' | 'model' | 'posts' | 'comments' | 'fps' | 'headed';
+type Setting = 'service' | 'key' | 'server' | 'model' | 'comments' | 'fps' | 'headed';
 const ADD_ACCOUNT = 'Add a new account…';
 const LOCAL_WHISPER = 'http://127.0.0.1:8080/v1';
 const WHISPER_MODEL = 'large-v3-turbo';
@@ -115,6 +115,7 @@ export function App({ db, dataDir, envPath, firstRun }: {
   const [settingsVersion, setSettingsVersion] = useState(0);
   const [pendingService, setPendingService] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingCollect, setPendingCollect] = useState<{ targets: string[]; batch: boolean; question: string } | null>(null);
   const collector = useCollector(db, dataDir, selected);
   const currentConfig = useMemo(() => loadConfig(), [settingsVersion]);
   const settingRows = useMemo<Array<{ id: Setting; label: string; value: string }>>(() => {
@@ -129,10 +130,9 @@ export function App({ db, dataDir, envPath, firstRun }: {
         { id: 'server' as const, label: 'Whisper server address', value: process.env.TRANSCRIPTION_BASE_URL || 'not set' },
         { id: 'model' as const, label: 'Whisper model', value: process.env.TRANSCRIPTION_MODEL || 'not set' },
       ] : []),
-      { id: 'posts', label: 'Newest posts collected per account', value: String(currentConfig.discovery.maxPosts ?? 'all') },
       { id: 'comments', label: 'Comments saved per post', value: String(currentConfig.commentLimit ?? 'all') },
       { id: 'fps', label: 'Images saved per video second', value: (1 / currentConfig.frameInterval).toFixed(2) },
-      { id: 'headed', label: 'Show browser while collecting', value: currentConfig.browser.headed ? 'yes' : 'no' },
+      { id: 'headed', label: 'Show browser while collecting', value: currentConfig.browser.show ? 'yes' : 'no' },
     ];
   }, [currentConfig, settingsVersion]);
   const ffmpeg = useMemo(() => { try { checkFfmpeg(); return true; } catch { return false; } }, []);
@@ -247,7 +247,7 @@ export function App({ db, dataDir, envPath, firstRun }: {
       return;
     }
     if (screen === 'login') return;
-    if (screen === 'add' || editing) return;
+    if (screen === 'add' || screen === 'limit' || editing) return;
     if (screen === 'home') {
       if (key.upArrow) setHomeIndex(Math.max(0, homeIndex - 1));
       else if (key.downArrow) setHomeIndex(Math.min(homeActions.length - 1, homeIndex + 1));
@@ -278,12 +278,18 @@ export function App({ db, dataDir, envPath, firstRun }: {
         if (targetAction === 'collect' && collector.sessionStatus !== 'valid') { setNotice('Connect Instagram before collecting.'); return; }
         if (targetAction === 'collect' && choiceIndex === 1) {
           if (!targetRows.length) { setNotice('Add an account first.'); return; }
-          goHome(); void collector.scrape(['--all'], true); return;
+          setPendingCollect({ targets: ['--all'], batch: true, question: 'How many of the newest posts should be collected from each account?' });
+          setScreen('limit'); return;
         }
         const row = targetRows[targetAction === 'collect' ? choiceIndex - 2 : choiceIndex];
         if (!row) return;
         setSelected(row.username);
-        if (targetAction === 'collect') { goHome(); void collector.scrape([row.username], false); }
+        if (targetAction === 'collect') {
+          setPendingCollect({ targets: [row.username], batch: false, question: row.postsCount != null
+            ? `@${row.username} has ${row.postsCount.toLocaleString()} posts. Collect all of them, or only the newest few?`
+            : `How many of @${row.username}'s newest posts should be collected?` });
+          setScreen('limit');
+        }
         else if (targetAction === 'retry') { goHome(); void collector.retry(row.username); }
         else if (targetAction === 'hide') { setConfirmIndex(0); setScreen('hide'); }
         else { setPage(0); setPostIndex(0); setDetailScroll(0); setScreen('browse'); }
@@ -336,6 +342,7 @@ export function App({ db, dataDir, envPath, firstRun }: {
 
   const footer = screen === 'first' ? 'Enter to continue'
     : screen === 'add' ? 'Type or paste names · Enter to save · Esc to go back'
+      : screen === 'limit' ? 'Type a number, or all · Enter to start · Esc to go back'
       : screen === 'login' ? 'Connecting with your Chrome login; if that fails, finish login in the window · Esc to cancel'
         : screen === 'post' ? '↑↓ choose · Enter to continue · PgUp/PgDn scroll the details · Esc to go back'
           : '↑↓ choose · Enter to continue · Esc to go back';
@@ -378,6 +385,18 @@ export function App({ db, dataDir, envPath, firstRun }: {
             setTargetAction('collect');
             setScreen('choose');
           } catch (error) { message(error); }
+        }} />
+      {notice ? <Text color="yellow">{notice}</Text> : null}
+    </Box> : null}
+    {screen === 'limit' && pendingCollect ? <Box borderStyle="single" flexDirection="column" paddingX={1} flexGrow={1}>
+      <Text bold>{pendingCollect.question}</Text>
+      <Text dimColor>Newest first, photos and videos alike. Asking for more later continues further down.</Text>
+      <TextInput placeholder="all, or a number like 50" defaultValue={String(currentConfig.discovery.maxPosts ?? 'all')}
+        onSubmit={(v) => {
+          const value = v.trim().toLowerCase() || 'all';
+          if (value !== 'all' && !/^[1-9]\d*$/.test(value)) { message(new Error('Enter a whole number, or all')); return; }
+          goHome();
+          void collector.scrape(pendingCollect.targets, pendingCollect.batch, value === 'all' ? null : Number(value));
         }} />
       {notice ? <Text color="yellow">{notice}</Text> : null}
     </Box> : null}
@@ -430,14 +449,12 @@ export function App({ db, dataDir, envPath, firstRun }: {
           TRANSCRIPTION_MODEL: process.env.TRANSCRIPTION_MODEL?.trim() || WHISPER_MODEL })} /> : null}
       {editing === 'model' ? <TextInput placeholder={WHISPER_MODEL} defaultValue={process.env.TRANSCRIPTION_MODEL || WHISPER_MODEL}
         onSubmit={(value) => save({ TRANSCRIPTION_MODEL: value.trim() })} /> : null}
-      {editing === 'posts' ? <TextInput placeholder="200 or all" defaultValue={String(currentConfig.discovery.maxPosts ?? 'all')}
-        onSubmit={(v) => { const value = v.trim().toLowerCase(); if (value !== 'all' && !/^[1-9]\d*$/.test(value)) message(new Error('Enter a whole number, or all')); else save({ POST_LIMIT: value }); }} /> : null}
       {editing === 'comments' ? <TextInput placeholder="100 or all" defaultValue={String(currentConfig.commentLimit ?? 'all')}
         onSubmit={(v) => save({ COMMENT_LIMIT: v })} /> : null}
       {editing === 'fps' ? <TextInput placeholder="1" defaultValue={String(1 / currentConfig.frameInterval)}
         onSubmit={(v) => { const fps = Number(v); if (!Number.isFinite(fps) || fps <= 0) message(new Error('Frames per second must be positive')); else save({ FRAME_INTERVAL: String(1 / fps) }); }} /> : null}
       {editing === 'headed' ? <Select options={[{ label: 'yes', value: 'true' }, { label: 'no', value: 'false' }]}
-        defaultValue={String(currentConfig.browser.headed)} onChange={(v) => save({ BROWSER_HEADED: v })} /> : null}
+        defaultValue={String(currentConfig.browser.show)} onChange={(v) => save({ BROWSER_SHOW: v })} /> : null}
       {editing === 'service' || editing === 'key' || editing === 'server' || editing === 'model'
         ? <Text dimColor>Whisper on this computer needs the whisper.cpp server running. See the README.</Text> : null}
       {notice ? <Text color="yellow">{notice}</Text> : null}

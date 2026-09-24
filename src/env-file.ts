@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import { createTranscriptionProvider } from './transcription-provider.js';
 
 const SETTINGS = new Set(['DATA_DIR', 'GROQ_API_KEY', 'OPENAI_API_KEY', 'TRANSCRIPTION_PROVIDER', 'TRANSCRIPTION_BASE_URL',
-  'TRANSCRIPTION_MODEL', 'TRANSCRIPTION_API_KEY', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_HEADED']);
+  'TRANSCRIPTION_MODEL', 'TRANSCRIPTION_API_KEY', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_HEADED', 'BROWSER_SHOW']);
 
 /** Save dashboard settings without discarding other environment entries or comments. */
 export function saveSettings(path: string, changes: Record<string, string>): void {

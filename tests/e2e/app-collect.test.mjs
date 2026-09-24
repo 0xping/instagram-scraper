@@ -109,6 +109,9 @@ test('the dashboard collects an account and stops a run on request', { timeout: 
     for (let i = 0; i < 2; i += 1) { ui.stdin.write('\x1b[B'); await wait(80); } // past "Add a new account" and "All accounts"
     await until(() => plain(ui.lastFrame()).includes(`› @${USER}`));
     ui.stdin.write('\r');
+    // A never-collected account has no post count yet, so the question asks without one; Enter collects all.
+    await until(() => ui.lastFrame()?.includes(`How many of @${USER}'s newest posts`));
+    ui.stdin.write('\r');
 
     // The run reaches the collector: both posts, their media and the comment are saved to this dataset.
     const count = (sql) => db.prepare(sql).get().n;
@@ -127,6 +130,9 @@ test('the dashboard collects an account and stops a run on request', { timeout: 
     assert.match(plain(ui.lastFrame()), new RegExp(`@${USER} · 2 posts · all collected · (just now|\\d+ min ago)`));
     for (let i = 0; i < 2; i += 1) { ui.stdin.write('\x1b[B'); await wait(80); }
     await until(() => plain(ui.lastFrame()).includes(`› @${USER}`));
+    ui.stdin.write('\r');
+    // Now the profile's post count is known and the question names it.
+    await until(() => /@\S+ has [\d,]+ posts\. Collect all/.test(plain(ui.lastFrame())));
     ui.stdin.write('\r');
     await until(() => ui.lastFrame()?.includes('Stop current task'));
     await choose(ui, 'Stop current task');

@@ -77,7 +77,7 @@ Needs about 1 GB of disk for the browser and FFmpeg, and an Instagram account yo
 4. **Review saved posts** — browse what was collected; photos, videos and frame folders open in your normal viewer.
 5. **Export data** — CSV and JSON in `exports/`.
 
-Accounts with thousands of posts: set **Settings → Newest posts collected per account** (or `POST_LIMIT`, or `scrape --post-limit N`) and discovery stops after the newest N, photos and Reels alike. Pinned posts sit at the top of the grid and count toward N. Raising the limit later walks further down on the next run; `all` walks the whole profile.
+Accounts with thousands of posts: when you collect an account, the dashboard shows how many posts it has and asks whether to collect all of them or only the newest N (the CLI uses `POST_LIMIT` or `scrape --post-limit N`). Discovery stops after the newest N, photos and Reels alike. Pinned posts sit at the top of the grid and count toward N. Raising the limit later walks further down on the next run; `all` walks the whole profile.
 
 Data is stored in `~/instagram-scraper-data` by default. Set `INSTAGRAM_SCRAPER_DATA` to keep separate datasets.
 
@@ -135,7 +135,7 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-`.env` accepts `DATA_DIR` (default `./data`) and `LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`). Browser settings are `BROWSER_HEADED` (default `true`; `false` runs headless, see profile collection below), `BROWSER_CHANNEL` (which installed browser to drive; default `chrome`, empty uses Playwright's bundled Chromium), `BROWSER_KEEP_PROFILE` (default `true`; keeps one profile in `<data>/browser/profile` so Instagram sees the same device each run), `NAVIGATION_TIMEOUT_MS` (default `30000`) and `LOGIN_TIMEOUT_MS` (how long `instagram:login` waits for you; default `600000`). Discovery settings are `DISCOVERY_SCROLL_DELAY_MS` (base pause after each scroll; default `2500`) and `DISCOVERY_MAX_IDLE_SCROLLS` (scrolls in a row with nothing new before the end is checked; default `5`). Relative data paths resolve from the directory where you run the CLI, and so does `competitors.txt`.
+`.env` accepts `DATA_DIR` (default `./data`) and `LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`). Browser settings are `BROWSER_HEADED` (default `true`; `false` runs headless, see profile collection below), `BROWSER_SHOW` (default `false`, which moves the headed window off screen so it stays out of the way and data stays exact; the login window always shows), `BROWSER_CHANNEL` (which installed browser to drive; default `chrome`, empty uses Playwright's bundled Chromium), `BROWSER_KEEP_PROFILE` (default `true`; keeps one profile in `<data>/browser/profile` so Instagram sees the same device each run), `NAVIGATION_TIMEOUT_MS` (default `30000`) and `LOGIN_TIMEOUT_MS` (how long `instagram:login` waits for you; default `600000`). Discovery settings are `DISCOVERY_SCROLL_DELAY_MS` (base pause after each scroll; default `2500`) and `DISCOVERY_MAX_IDLE_SCROLLS` (scrolls in a row with nothing new before the end is checked; default `5`). Relative data paths resolve from the directory where you run the CLI, and so does `competitors.txt`.
 
 ```sh
 npm run dev -- init

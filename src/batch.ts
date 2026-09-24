@@ -23,6 +23,8 @@ export interface StatusRow {
   metadata: number;
   media: number;
   failed: number;
+  /** From the profile page; null until the account has been collected once. */
+  postsCount: number | null;
   lastScrapedAt: string | null;
   jobStatus: string | null;
   jobError: string | null;
@@ -44,7 +46,7 @@ export function competitorStatus(db: Database.Database): StatusRow[] {
         OR p.transcript_status = 'failed' OR p.comments_status = 'failed'), 0) AS failed
       FROM owned o JOIN posts p ON p.id = o.post_id GROUP BY o.competitor_id
     )
-    SELECT c.username, c.last_scraped_at AS lastScrapedAt,
+    SELECT c.username, c.posts_count AS postsCount, c.last_scraped_at AS lastScrapedAt,
       coalesce(counts.discovered, 0) AS discovered,
       coalesce(counts.metadata, 0) AS metadata,
       coalesce(counts.media, 0) AS media,

@@ -100,8 +100,10 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
     void browserRef.current?.close();
   }, [log]);
 
-  const scrape = useCallback((targets: string[], batch: boolean): Promise<void> => work('Scrape', async (signal) => {
+  /** maxPosts: the newest posts to collect per account, asked for at each run; null collects them all. */
+  const scrape = useCallback((targets: string[], batch: boolean, maxPosts: number | null): Promise<void> => work('Scrape', async (signal) => {
     const settings = config();
+    settings.discovery.maxPosts = maxPosts;
     const browser = new BrowserManager({ ...settings.browser }, log);
     browserRef.current = browser;
     const handle = await openCollector({ log, signal, config: settings, targets, browser });
@@ -150,8 +152,8 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
   const login = useCallback((): Promise<void> => work('Instagram login', async (signal) => {
     const settings = config();
     const statePath = join(dataDir, 'browser', 'instagram-state.json');
-    const attempt = async (headed: boolean, run: (session: InstagramSessionManager) => Promise<void>): Promise<void> => {
-      const browser = new BrowserManager({ ...settings.browser, headed }, log);
+    const attempt = async (headed: boolean, run: (session: InstagramSessionManager) => Promise<void>, show = settings.browser.show): Promise<void> => {
+      const browser = new BrowserManager({ ...settings.browser, headed, show }, log);
       browserRef.current = browser;
       try {
         await run(new InstagramSessionManager(browser, statePath, settings.browser.loginTimeoutMs, log));
@@ -165,7 +167,7 @@ export function useCollector(db: Database.Database, dataDir: string, selected: s
       if (signal.aborted) throw error;
       log.warn(`Chrome cookies: ${(error as Error).message}`);
       log.info('Opening a login window instead. Log in there as you normally would.');
-      await attempt(true, (session) => session.login());
+      await attempt(true, (session) => session.login(), true);
     }
     setSessionStatus('valid');
   }), [work, log, dataDir, config]);

@@ -17,6 +17,8 @@ export async function waitForResponses(responses: Iterable<Promise<void>>, timeo
 
 export interface BrowserOptions {
   headed: boolean;
+  /** false moves a headed window off screen. Instagram degrades headless pages, so hiding must stay headed. */
+  show?: boolean;
   navigationTimeoutMs: number;
   /**
    * The installed browser to drive ('chrome', 'msedge', …) instead of Playwright's own Chromium build.
@@ -86,7 +88,9 @@ export class BrowserManager {
 
   private launchOptions() {
     // The CLI owns Ctrl-C/SIGTERM so it can record progress before closing; Playwright's own handlers would race it.
-    return { headless: !this.options.headed, handleSIGINT: false, handleSIGTERM: false };
+    // ponytail: off-screen position hides the window; if a window manager clamps it back on screen, use CDP minimize.
+    const args = this.options.headed && this.options.show === false ? ['--window-position=-32000,-32000'] : [];
+    return { headless: !this.options.headed, args, handleSIGINT: false, handleSIGTERM: false };
   }
 
   private warnMissingChannel(): void {

@@ -133,6 +133,7 @@ async function runCommand(args: string[]): Promise<void> {
     const browser = new BrowserManager({
       ...config.browser,
       headed: command === 'instagram-login' || config.browser.headed,
+      show: command === 'instagram-login' || config.browser.show,
     }, log);
     const session = new InstagramSessionManager(browser, paths.instagramState, config.browser.loginTimeoutMs, log);
     const onSignal = (): void => {

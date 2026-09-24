@@ -9,6 +9,8 @@ export interface AppConfig {
   commentLimit: number | null;
   browser: {
     headed: boolean;
+    /** A headed window on screen; false parks it off screen, keeping headed data without the window in the way. */
+    show: boolean;
     navigationTimeoutMs: number;
     loginTimeoutMs: number;
     /** Installed browser to drive; '' uses Playwright's bundled Chromium. */
@@ -46,6 +48,7 @@ export function loadConfig(projectDir = process.cwd()): AppConfig {
     browser: {
       // Instagram serves logged-in headless browsers a degraded page, so headed is the default.
       headed: envBoolean('BROWSER_HEADED', true),
+      show: envBoolean('BROWSER_SHOW', false),
       navigationTimeoutMs: envPositiveInt('NAVIGATION_TIMEOUT_MS', 30_000),
       loginTimeoutMs: envPositiveInt('LOGIN_TIMEOUT_MS', 600_000),
       // Instagram's security check will not accept a correct answer in the bundled Chromium on macOS,
