@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { chromium, type Browser, type BrowserContext } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import type { Logger } from './logger.js';
 
 /** A response that never finishes must not hold a page's extraction loop open indefinitely. */
@@ -17,7 +17,7 @@ export async function waitForResponses(responses: Iterable<Promise<void>>, timeo
 
 export interface BrowserOptions {
   headed: boolean;
-  /** false moves a headed window off screen. Instagram degrades headless pages, so hiding must stay headed. */
+  /** false keeps a headed window out of sight (off screen and minimized). Instagram degrades headless pages, so hiding must stay headed. */
   show?: boolean;
   navigationTimeoutMs: number;
   /**
@@ -88,9 +88,28 @@ export class BrowserManager {
 
   private launchOptions() {
     // The CLI owns Ctrl-C/SIGTERM so it can record progress before closing; Playwright's own handlers would race it.
-    // ponytail: off-screen position hides the window; if a window manager clamps it back on screen, use CDP minimize.
-    const args = this.options.headed && this.options.show === false ? ['--window-position=-32000,-32000'] : [];
+    const args = this.hidden ? ['--window-position=-32000,-32000'] : [];
     return { headless: !this.options.headed, args, handleSIGINT: false, handleSIGTERM: false };
+  }
+
+  /** A headed window kept out of sight. Headless is not an option: Instagram degrades headless pages. */
+  private get hidden(): boolean {
+    return this.options.headed && this.options.show === false;
+  }
+
+  /**
+   * macOS and Wayland clamp an off-screen window back into view, so the window is also minimized to the Dock.
+   * Playwright's default flags keep a minimized window rendering, so scrolling and extraction are unaffected.
+   */
+  private async minimize(page: Page): Promise<void> {
+    try {
+      const cdp = await page.context().newCDPSession(page);
+      const { windowId } = await cdp.send('Browser.getWindowForTarget');
+      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+      await cdp.detach();
+    } catch (error) {
+      this.log.debug(`Could not minimize the browser window: ${(error as Error).message}`);
+    }
   }
 
   private warnMissingChannel(): void {
@@ -101,6 +120,10 @@ export class BrowserManager {
     context.setDefaultTimeout(this.options.navigationTimeoutMs);
     context.setDefaultNavigationTimeout(this.options.navigationTimeoutMs);
     this.contexts.add(context);
+    if (this.hidden) {
+      for (const page of context.pages()) void this.minimize(page);
+      context.on('page', (page) => void this.minimize(page));
+    }
     context.on('close', () => this.contexts.delete(context));
   }
 

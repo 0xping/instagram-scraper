@@ -2,13 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import type Database from 'better-sqlite3';
 import { chromium } from 'playwright';
 import { BrowserManager } from '../browser.js';
 import { competitorStatus, type StatusRow } from '../batch.js';
 import { loadConfig, type AppConfig } from '../config.js';
-import { hideCompetitor, registerCompetitors } from '../db.js';
+import { acquireDatasetLock, hideCompetitor, registerCompetitors } from '../db.js';
 import { saveSettings } from '../env-file.js';
 import { checkFfmpeg } from '../frames.js';
 import { connectWithCookies } from '../instagram-cookies.js';
@@ -18,7 +19,8 @@ import { postDir } from '../media-files.js';
 import { openDataPath, resolveDataPath } from '../open-path.js';
 import { dataPaths } from '../paths.js';
 import { formatPipelineSummary, pipelineTotals } from '../pipeline.js';
-import { exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors } from '../runner.js';
+import { deletePosts, exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors } from '../runner.js';
+import { createChat } from './chat.js';
 import { parseAccountList } from './model.js';
 
 const PAGE = new URL('../../src/app/page.html', import.meta.url);
@@ -50,6 +52,19 @@ class HttpError extends Error {
 }
 
 /**
+ * The dataset lock the CLI takes too. The dashboard holds it only while it works, so a CLI command (an AI agent
+ * collecting, say) can run while the page stays open for browsing. Release it with close().
+ */
+function lockDataset(dataDir: string): Database.Database {
+  try {
+    return acquireDatasetLock(dataDir);
+  } catch (error) {
+    if (!/Another collector command/.test((error as Error).message)) throw error;
+    throw new HttpError(409, 'A command-line collection is using this data folder right now. Its posts show here as it saves them; start this when it finishes.');
+  }
+}
+
+/**
  * One task at a time, like the CLI: a busy flag, an AbortController, and the browser closed on Stop. The task
  * lives here, not in the page, so closing the tab never stops a collection and reopening it shows the progress.
  */
@@ -76,6 +91,8 @@ function createCollector(db: Database.Database, dataDir: string) {
   function work(kind: Task['kind'], label: string, usernames: string[], action: (signal: AbortSignal) => Promise<void>): void {
     if (abort) throw new HttpError(409, `${task?.label ?? 'Another task'} is still running. Wait for it, or press Stop.`);
     const controller = new AbortController();
+    // Taken before anything changes, so a refusal leaves the previous task on show.
+    const lock = lockDataset(dataDir);
     abort = controller;
     task = { kind, label, usernames, startedAt: new Date().toISOString(), finishedAt: null, stopping: false, results: {} };
     const current = task;
@@ -90,6 +107,7 @@ function createCollector(db: Database.Database, dataDir: string) {
         browser = null;
         abort = null;
         current.finishedAt = new Date().toISOString();
+        lock.close();
       }
     })();
   }
@@ -256,7 +274,8 @@ function state(db: Database.Database, collector: Collector, setup: string[]) {
     accounts: rows.map((r) => ({
       username: r.username, saved: r.discovered, postsCount: r.postsCount, failed: r.failed, lastAt: r.jobAt ?? r.lastScrapedAt,
       avatar: avatars.get(r.username) ?? null,
-      ...describe(r, r.jobStatus === 'running' && running),
+      // A running job the dashboard does not own is the CLI's: interrupted ones are marked failed at the next start.
+      ...describe(r, r.jobStatus === 'running'),
     })),
     logs: collector.logs.slice(-150),
   };
@@ -270,19 +289,35 @@ function competitorId(db: Database.Database, username: unknown): { id: number; u
 
 const OWNED = `(p.competitor_id = @id OR EXISTS (SELECT 1 FROM competitor_posts cp WHERE cp.post_id = p.id AND cp.competitor_id = @id))`;
 
-function posts(db: Database.Database, username: unknown, offset: number, limit: number) {
+/** How the grid can be ordered; the key is what the page and agents send as `sort`. */
+const SORTS: Record<string, string> = {
+  newest: 'p.published_at IS NULL, p.published_at DESC', oldest: 'p.published_at IS NULL, p.published_at',
+  likes: 'p.likes_count IS NULL, p.likes_count DESC', comments: 'p.comments_count IS NULL, p.comments_count DESC',
+  views: 'coalesce(p.views_count, p.plays_count) IS NULL, coalesce(p.views_count, p.plays_count) DESC',
+};
+const TYPES = new Set(['reel', 'carousel', 'image']);
+
+interface PostFilter { type?: string | null; q?: string | null; sort?: string | null }
+
+function posts(db: Database.Database, username: unknown, offset: number, limit: number, filter: PostFilter = {}) {
   const { id } = competitorId(db, username);
+  if (filter.type && !TYPES.has(filter.type)) throw new HttpError(400, `type must be one of: ${[...TYPES].join(', ')}.`);
+  if (filter.sort && !SORTS[filter.sort]) throw new HttpError(400, `sort must be one of: ${Object.keys(SORTS).join(', ')}.`);
+  const q = filter.q?.trim() ?? '';
+  const where = `${OWNED}${filter.type ? ' AND p.type = @type' : ''}${q ? " AND p.caption LIKE @q ESCAPE '\\'" : ''}`;
+  const params = { id, type: filter.type ?? null, q: `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` };
   const rows = db.prepare(`SELECT p.id, p.shortcode, p.type, p.published_at AS publishedAt, p.likes_count AS likes, p.comments_count AS comments,
       coalesce(p.views_count, p.plays_count) AS views,
       coalesce(p.thumbnail_path,
         (SELECT m.local_path FROM media m WHERE m.post_id = p.id AND m.download_status = 'complete' AND m.local_path IS NOT NULL
           AND lower(m.local_path) NOT GLOB '*.mp4' AND lower(m.local_path) NOT GLOB '*.mov' ORDER BY m.position LIMIT 1),
         (SELECT f.image_path FROM reel_frames f WHERE f.post_id = p.id ORDER BY f.timestamp_seconds LIMIT 1)) AS thumb
-    FROM posts p WHERE ${OWNED}
-    ORDER BY p.published_at IS NULL, p.published_at DESC, p.id LIMIT @limit OFFSET @offset`).all({ id, limit: limit + 1, offset }) as Array<Record<string, unknown>>;
+    FROM posts p WHERE ${where}
+    ORDER BY ${SORTS[filter.sort ?? 'newest']}, p.id LIMIT @limit OFFSET @offset`).all({ ...params, limit: limit + 1, offset }) as Array<Record<string, unknown>>;
+  const total = (db.prepare(`SELECT count(*) AS n FROM posts p WHERE ${where}`).get(params) as { n: number }).n;
   const account = db.prepare(`SELECT username, display_name AS name, followers_count AS followers, posts_count AS postsCount, bio,
     profile_image_path AS avatar, last_scraped_at AS lastAt FROM competitors WHERE id = ?`).get(id);
-  return { account, posts: rows.slice(0, limit), more: rows.length > limit };
+  return { account, total, posts: rows.slice(0, limit), more: rows.length > limit };
 }
 
 function post(db: Database.Database, dataDir: string, id: number) {
@@ -346,6 +381,8 @@ function saveFromForm(envPath: string, body: Record<string, unknown>): void {
   if (!Number.isFinite(fps) || fps <= 0) throw new HttpError(400, 'Images per video second must be more than 0.');
   changes.FRAME_INTERVAL = String(Number((1 / fps).toFixed(4)));
   changes.BROWSER_SHOW = body.show === true ? 'true' : 'false';
+  // Hidden means off screen, never headless (Instagram degrades headless pages); this also repairs older setups.
+  changes.BROWSER_HEADED = 'true';
   saveSettings(envPath, changes);
 }
 
@@ -411,6 +448,7 @@ export async function startDashboard(options: {
   const open = options.open ?? openDataPath;
   const token = randomBytes(24).toString('base64url');
   const collector = createCollector(db, dataDir);
+  const chat = createChat({ appDir: fileURLToPath(new URL('../../', import.meta.url)), dataDir });
   const setup = setupProblems();
   const page = readFileSync(PAGE);
   let host = '';
@@ -422,9 +460,17 @@ export async function startDashboard(options: {
   };
 
   const routes: Record<string, (body: Record<string, unknown>, url: URL) => unknown> = {
-    'GET /api/state': () => state(db, collector, setup),
+    'GET /api/state': () => { checkSession(); return { ...state(db, collector, setup), chat: chat.state() }; },
+    'POST /api/chat': (body) => {
+      const text = typeof body.message === 'string' ? body.message.trim() : '';
+      if (!text) throw new HttpError(400, 'Write a message.');
+      chat.send(text);
+    },
+    'POST /api/chat/stop': () => chat.stop(),
+    'POST /api/chat/new': () => chat.reset(),
     'GET /api/posts': (_, url) => posts(db, url.searchParams.get('account'), Math.max(0, Number(url.searchParams.get('offset')) || 0),
-      Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 30))),
+      Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 30)),
+      { type: url.searchParams.get('type'), q: url.searchParams.get('q'), sort: url.searchParams.get('sort') }),
     'GET /api/post': (_, url) => post(db, dataDir, Number(url.searchParams.get('id'))),
     'GET /api/settings': () => settings(collector.config()),
     'POST /api/settings': (body) => { saveFromForm(envPath, body); collector.log.info('Settings saved.'); return settings(collector.config()); },
@@ -444,6 +490,15 @@ export async function startDashboard(options: {
       const targets = body.accounts === 'all' ? 'all' : Array.isArray(body.accounts) ? body.accounts.filter((a): a is string => typeof a === 'string') : [];
       if (targets !== 'all' && !targets.length) throw new HttpError(400, 'Paste a username, or tick an account.');
       collector.collect(targets, max as number | null);
+    },
+    // For good: files and collected data go, and later collects skip these posts.
+    'POST /api/delete-posts': (body) => {
+      const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is number => Number.isSafeInteger(id)) : [];
+      if (!ids.length) throw new HttpError(400, 'Send ids: the numbers of the posts to delete.');
+      // A running collect may be writing into those folders.
+      if (collector.running) throw new HttpError(409, `${collector.task?.label ?? 'A task'} is still running. Wait for it, or press Stop.`);
+      const lock = lockDataset(dataDir);
+      try { return { deleted: deletePosts(db, dataDir, ids, collector.log) }; } finally { lock.close(); }
     },
     'POST /api/retry': (body) => collector.retry(competitorId(db, body.account).username),
     'POST /api/hide': (body) => {
@@ -510,7 +565,12 @@ export async function startDashboard(options: {
   });
   const { port } = server.address() as AddressInfo;
   host = `127.0.0.1:${port}`;
-  if (options.checkSession !== false && collector.session === 'checking') collector.check();
+  // The CLI may be collecting at launch; the state poll tries the check again once it is done.
+  const checkSession = (): void => {
+    if (options.checkSession === false || collector.session !== 'checking' || collector.running) return;
+    try { collector.check(); } catch (error) { if (!(error instanceof HttpError)) throw error; }
+  };
+  checkSession();
 
   return {
     url: `http://${host}/?t=${token}`,
@@ -518,6 +578,7 @@ export async function startDashboard(options: {
     collector,
     /** Stops any task, waits for its browser to close, then stops serving. */
     async close(): Promise<void> {
+      chat.stop();
       collector.stop();
       await collector.settle();
       server.closeAllConnections();

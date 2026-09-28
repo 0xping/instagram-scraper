@@ -117,6 +117,10 @@ main { width: min(880px, 100% - 32px); margin: 0 auto; padding: 32px 0 64px; dis
 .stats span { display: inline-flex; align-items: center; gap: 4px; }
 .stats svg.i { width: 14px; height: 14px; }
 .more { justify-self: center; }
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.filters input { flex: 1; min-width: 180px; }
+.filters .muted { font-size: 14px; margin-left: auto; }
+.danger-btn { color: var(--bad); }
 
 [popover].menu { inset: auto; margin: 0; padding: 6px; width: 250px; border-radius: 12px; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
   box-shadow: 0 12px 32px rgb(28 27 24 / .14); }
@@ -183,10 +187,24 @@ dialog.post { width: min(1040px, 100vw - 32px); }
   .hint { display: none; }
   .row { padding: 12px 14px; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filters select { flex: 1; } .filters .muted { width: 100%; margin: 0; }
   .acct .actions { width: 100%; } .acct .actions .primary { flex: 1; }
   .post-body { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; max-height: calc(100vh - 48px); overflow: auto; }
   .media { height: 60vh; } .info { overflow: visible; }
 }
+.chat { position: fixed; top: 76px; right: 16px; bottom: 16px; z-index: 10; width: min(400px, 100vw - 32px); display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 16px 48px rgb(0 0 0 / .18); }
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--line); }
+.chat-head div { flex: 1; display: grid; }
+.chat-head small { font-size: 12px; color: var(--muted); }
+.chat-log { flex: 1; overflow: auto; padding: 16px 18px; display: grid; gap: 10px; align-content: start; font-size: 14px; }
+.msg { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.msg.user { justify-self: end; max-width: 85%; padding: 8px 12px; border-radius: 12px 12px 4px 12px; background: var(--ink); color: var(--on-ink); }
+.msg.tool { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); padding-left: 10px; border-left: 2px solid var(--line-strong); }
+.msg.error { color: var(--bad); }
+.chat-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); align-items: end; }
+.chat-form textarea { flex: 1; font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); resize: none; min-height: 44px; max-height: 140px; }
+@media (max-width: 720px) { .chat { top: 72px; right: 8px; left: 8px; bottom: 8px; width: auto; } #chat-open { width: 44px; padding: 0; } #chat-open span { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -208,6 +226,8 @@ dialog.post { width: min(1040px, 100vw - 32px); }
   <symbol id="i-comment" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-12.2 7.5L3 21l2-5.6A8.4 8.4 0 1 1 21 11.5z"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
 </svg>
 
@@ -215,8 +235,22 @@ dialog.post { width: min(1040px, 100vw - 32px); }
   <span class="logo" aria-hidden="true"><svg class="i"><use href="#i-cam"/></svg></span>
   <a class="title" href="#/"><span>Instagram research</span></a>
   <span id="status" class="pill dot status" role="status">Loading…</span>
+  <button id="chat-open" aria-expanded="false" aria-controls="chat"><svg class="i"><use href="#i-chat"/></svg><span>Ask Claude</span></button>
   <button class="square" popovertarget="menu-main" aria-label="More"><svg class="i"><use href="#i-dots"/></svg></button>
 </header>
+<aside id="chat" class="chat" aria-label="Chat with Claude" hidden>
+  <div class="chat-head">
+    <div><b>Claude</b><small>Claude Code on this computer: it can collect and read your data</small></div>
+    <button id="chat-new" class="link">New chat</button>
+    <button id="chat-close" class="square" aria-label="Close chat"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div id="chat-log" class="chat-log" aria-live="polite"></div>
+  <form id="chat-form" class="chat-form">
+    <textarea id="chat-input" rows="1" placeholder="Collect the newest 2 posts of @nike" aria-label="Message to Claude"></textarea>
+    <button id="chat-send" class="primary">Send</button>
+    <button id="chat-stop" type="button" hidden>Stop</button>
+  </form>
+</aside>
 <div id="menu-main" class="menu" popover>
   <button data-act="reconnect"><svg class="i"><use href="#i-link"/></svg>Reconnect Instagram</button>
   <button data-act="open-data"><svg class="i"><use href="#i-folder"/></svg>Open data folder</button>
@@ -274,6 +308,17 @@ dialog.post { width: min(1040px, 100vw - 32px); }
       </div>
     </div>
     <div id="a-retry" class="retry" hidden><span></span><button id="a-retry-btn">Retry</button></div>
+    <form id="filters" class="filters" role="search" aria-label="Filter posts">
+      <input id="f-q" name="q" type="search" placeholder="Search captions" aria-label="Search captions">
+      <select id="f-type" name="type" aria-label="Post type">
+        <option value="">All types</option><option value="reel">Reels</option><option value="carousel">Carousels</option><option value="image">Photos</option>
+      </select>
+      <select id="f-sort" name="sort" aria-label="Sort posts">
+        <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="likes">Most likes</option>
+        <option value="comments">Most comments</option><option value="views">Most views</option>
+      </select>
+      <span id="f-count" class="muted" role="status"></span>
+    </form>
     <div id="grid" class="grid"></div>
     <button id="more" class="more" hidden>Show more</button>
   </div>
@@ -306,6 +351,14 @@ dialog.post { width: min(1040px, 100vw - 32px); }
     <h2 id="hide-title"></h2>
     <p class="muted">It leaves the list; everything saved stays on this computer. Add the same name again to bring it back.</p>
     <div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Hide</button></div>
+  </form>
+</dialog>
+
+<dialog id="delete-dialog">
+  <form id="delete-form">
+    <h2>Delete this post?</h2>
+    <p class="muted">Its photos, video, comments and transcript are removed from this computer, and collecting again skips it.</p>
+    <div class="buttons"><button type="button" data-close>Cancel</button><button class="primary" id="delete-confirm">Delete post</button></div>
   </form>
 </dialog>
 
@@ -459,6 +512,7 @@ function render() {
   $('#setup').textContent = S.setup.join(' ');
   renderActivity();
   renderAccounts();
+  renderChat();
   if (current) renderAccountHead();
 }
 
@@ -540,6 +594,7 @@ function renderAccounts() {
       : `<small>${a.saved || a.lastAt ? `${saved} · collected ${esc(ago(a.lastAt))}` : 'Not collected yet'}</small>`;
     const pill = r ? { running: '<span class="pill busy">Collecting</span>', waiting: '<span class="pill">Waiting</span>', done: '<span class="pill ok">Done</span>',
       skipped: '<span class="pill ok">Up to date</span>', attention: '<span class="pill warn">Needs a look</span>' }[r.status] ?? ''
+      : a.tone === 'busy' ? '<span class="pill busy">Collecting</span>'
       : a.failed ? `<span class="pill warn">${whole.format(a.failed)} failed</span>` : !a.saved && !a.lastAt ? '<span class="pill">New</span>' : '';
     return `<a class="row" href="#/a/${encodeURIComponent(a.username)}"><span class="avatar">${avatar(a)}</span>
       <span class="who"><b>@${esc(a.username)}</b>${line}</span>${pill}<svg class="i chev"><use href="#i-right"/></svg></a>`;
@@ -692,33 +747,44 @@ function route() {
   $('#home').hidden = Boolean(current);
   $('#account').hidden = !current;
   scrollTo(0, 0);
-  if (current) { loaded = []; info = null; $('#grid').innerHTML = ''; loadPosts(true); }
+  if (current) { loaded = []; info = null; $('#grid').innerHTML = ''; $('#filters').reset(); loadPosts(true); }
 }
 addEventListener('hashchange', route);
 
+let request = 0;
 async function loadPosts(reset) {
   const who = current;
+  const mine = ++request;
   let data;
   try {
-    data = await api(`/api/posts?account=${encodeURIComponent(who)}&offset=${reset ? 0 : loaded.length}&limit=${reset ? Math.max(40, loaded.length) : 40}`);
+    const f = new URLSearchParams({ account: who, offset: reset ? 0 : loaded.length, limit: reset ? Math.max(40, loaded.length) : 40 });
+    for (const [key, value] of new FormData($('#filters'))) if (value) f.set(key, value.trim());
+    data = await api(`/api/posts?${f}`);
   } catch (error) {
     toast(error.message, 'error');
     location.hash = '#/';
     return;
   }
-  if (who !== current) return;
+  // A newer search or filter may have answered first.
+  if (who !== current || mine !== request) return;
   info = data.account;
   loaded = reset ? data.posts : loaded.concat(data.posts);
   $('#more').hidden = !data.more;
+  const filtered = $('#f-q').value.trim() || $('#f-type').value;
+  $('#f-count').textContent = filtered ? `${plural(data.total, 'post')} match` : plural(data.total, 'post');
   if (S) renderAccountHead();
   $('#grid').innerHTML = loaded.length ? loaded.map(tile).join('')
-    : '<div class="empty" style="grid-column:1/-1"><b>No posts saved yet</b><span class="muted">Press Collect to get this account’s posts.</span></div>';
+    : filtered ? '<div class="empty" style="grid-column:1/-1"><b>No post matches</b><span class="muted">Change the search or the type.</span></div>'
+      : '<div class="empty" style="grid-column:1/-1"><b>No posts saved yet</b><span class="muted">Press Collect to get this account’s posts.</span></div>';
 }
+let typing = null;
+$('#filters').oninput = (event) => { clearTimeout(typing); typing = setTimeout(() => loadPosts(true), event.target.type === 'search' ? 250 : 0); };
+$('#filters').onsubmit = (event) => event.preventDefault();
 $('#more').onclick = () => loadPosts(false);
 
 function tile(p) {
   const kind = KINDS[p.type] ?? 'Post';
-  return `<button class="tile" data-post="${p.id}" aria-label="${esc(kind)}${p.publishedAt ? ` from ${esc(date(p.publishedAt))}` : ''}">
+  return `<button class="tile" data-post="${p.id}" data-shortcode="${esc(p.shortcode)}" aria-label="${esc(kind)}${p.publishedAt ? ` from ${esc(date(p.publishedAt))}` : ''}">
     <span class="thumb">${p.thumb ? `<img loading="lazy" src="${media(p.thumb)}" alt="">` : icon(p.type === 'reel' ? 'play' : 'image')}<span class="kind">${esc(kind)}</span></span>
     <span class="meta"><b${p.publishedAt ? '' : ' class="muted"'}>${p.publishedAt ? esc(date(p.publishedAt)) : 'Details not collected yet'}</b>
       <span class="stats"><span>${icon('heart')}${count(p.likes)}</span><span>${icon('comment')}${count(p.comments)}</span>${p.views != null ? `<span>${icon('eye')}${count(p.views)}</span>` : ''}</span></span>
@@ -740,6 +806,7 @@ function renderAccountHead() {
   $('#a-line1').hidden = !$('#a-line1').textContent;
   const r = busy() ? runRows().get(current) : null;
   $('#a-line2').textContent = r?.status === 'running' ? `Collecting now · ${r.stage}`
+    : row.tone === 'busy' ? `Collecting from the command line · ${whole.format(row.saved)} posts saved so far`
     : `${whole.format(row.saved)}${row.postsCount != null && row.postsCount > row.saved ? ` of ${whole.format(row.postsCount)}` : ''} posts saved${row.lastAt ? ` · collected ${ago(row.lastAt)}` : ''}`;
   $('#a-retry').hidden = !row.failed;
   $('#a-retry span').textContent = `${plural(row.failed, 'post')} did not finish. Instagram or the network stopped ${row.failed === 1 ? 'it' : 'them'}.`;
@@ -779,6 +846,7 @@ async function openPost(id) {
     <div class="actions">
       <button id="p-folder" ${p.folder ? '' : 'disabled title="Nothing saved for this post yet"'}>${icon('folder')}Open folder</button>
       ${p.url ? `<a class="btn" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${icon('out')}Open on Instagram</a>` : ''}
+      <button id="p-delete" class="danger-btn" ${busy() ? 'disabled title="Wait for the collect to finish"' : ''}>${icon('trash')}Delete post</button>
     </div>
     <div><h3>Caption</h3><p class="text" dir="auto">${p.caption ? esc(p.caption) : '<span class="muted">No caption.</span>'}</p></div>
     ${p.type === 'reel' || p.transcript ? `<div><h3>Speech in the video</h3><p class="text" dir="auto">${p.transcript ? esc(p.transcript) : '<span class="muted">Not transcribed. Turn on video speech in Settings, then collect again.</span>'}</p></div>` : ''}
@@ -786,10 +854,57 @@ async function openPost(id) {
       : '<p class="muted" style="margin:0">No comments saved.</p>'}</div>
     ${p.frames.length ? `<div><h3>Video images (${whole.format(p.frames.length)})</h3><div class="frames">${p.frames.slice(0, 24).map((f) => `<img loading="lazy" src="${media(f)}" alt="">`).join('')}</div></div>` : ''}`;
   if (p.folder) $('#p-folder').onclick = () => act(() => api('/api/open', { what: 'post', id: p.id }));
+  $('#p-delete').onclick = () => { deleting = p.id; $('#delete-dialog').showModal(); };
   $('#post').showModal();
   $('#p-info').scrollTop = 0;
 }
+let deleting = null;
+$('#delete-form').onsubmit = async (event) => {
+  event.preventDefault();
+  if (!await act(() => api('/api/delete-posts', { ids: [deleting] }), 'Post deleted.')) return;
+  $('#delete-dialog').close();
+  $('#post').close();
+  loadPosts(true);
+};
 $('#post').addEventListener('close', () => { $('#p-media').innerHTML = ''; });
+
+// ---- Chat with Claude -------------------------------------------------------------------------------
+
+let chatKey = '';
+function renderChat() {
+  const { messages, running } = S.chat;
+  $('#chat-send').hidden = running;
+  $('#chat-stop').hidden = !running;
+  $('#chat-new').disabled = running || !messages.length;
+  const key = JSON.stringify([messages.length, messages.at(-1), running]);
+  if (key === chatKey) return;
+  chatKey = key;
+  const log = $('#chat-log');
+  log.innerHTML = (messages.length ? messages.map((m) => `<p class="msg ${m.role}" dir="auto">${m.role === 'tool' ? '▸ ' : ''}${esc(m.text)}</p>`).join('')
+    : '<p class="msg muted">Ask Claude to collect accounts, a number of posts, or to find something in what you collected. New posts show up on this page as they’re saved.</p>')
+    + (running ? '<p class="msg muted">Working…</p>' : '');
+  log.scrollTop = log.scrollHeight;
+}
+function showChat(open) {
+  $('#chat').hidden = !open;
+  $('#chat-open').setAttribute('aria-expanded', String(open));
+  if (open) $('#chat-input').focus();
+}
+$('#chat-open').onclick = () => showChat($('#chat').hidden);
+$('#chat-close').onclick = () => showChat(false);
+$('#chat-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const input = $('#chat-input');
+  const message = input.value.trim();
+  if (!message) { input.focus(); return; }
+  if (await act(() => api('/api/chat', { message }))) input.value = '';
+};
+// Enter sends; Shift+Enter starts a new line.
+$('#chat-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#chat-form').requestSubmit(); }
+});
+$('#chat-stop').onclick = () => act(() => api('/api/chat/stop', {}));
+$('#chat-new').onclick = () => act(() => api('/api/chat/new', {}));
 
 route();
 poll();

@@ -1,4 +1,4 @@
-/* global Buffer, URL, fetch */
+/* global Buffer, URL, fetch, setTimeout */
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
@@ -10,10 +10,12 @@ import { parseAccountList } from '../dist/app/model.js';
 import { startDashboard } from '../dist/app/server.js';
 import { competitorStatus } from '../dist/batch.js';
 import { listCompetitors } from '../dist/competitors.js';
-import { hideCompetitor, migrate, openDatabase, registerCompetitors } from '../dist/db.js';
+import { acquireDatasetLock, hideCompetitor, migrate, openDatabase, registerCompetitors } from '../dist/db.js';
 import { saveSettings } from '../dist/env-file.js';
 import { openDataPath, openInstagramUrl, resolveDataPath } from '../dist/open-path.js';
 import { resolveCompetitors } from '../dist/runner.js';
+import { saveDiscovered } from '../dist/discovery.js';
+import { execFileSync } from 'node:child_process';
 
 test('pasted text and imported files give usernames, and archiving preserves data', () => {
   assert.deepEqual(parseAccountList(' @Alpha, https://instagram.com/beta/\n gamma @alpha'), { usernames: ['alpha', 'beta', 'gamma'], skipped: [] });
@@ -105,7 +107,7 @@ test('opening a missing folder or invalid URL rejects instead of throwing', asyn
 /** A dataset with one collected account (a photo post with a comment and a saved file) and one never collected. */
 async function dashboard(t) {
   const dir = mkdtempSync(join(tmpdir(), 'app-server-'));
-  const envKeys = ['DATA_DIR', 'TRANSCRIPTION_PROVIDER', 'TRANSCRIPTION_BASE_URL', 'TRANSCRIPTION_MODEL', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_SHOW', 'GROQ_API_KEY'];
+  const envKeys = ['DATA_DIR', 'TRANSCRIPTION_PROVIDER', 'TRANSCRIPTION_BASE_URL', 'TRANSCRIPTION_MODEL', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_SHOW', 'BROWSER_HEADED', 'GROQ_API_KEY'];
   const previous = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   process.env.DATA_DIR = dir;
   const db = openDatabase(join(dir, 'collector.sqlite'));
@@ -235,10 +237,118 @@ test('settings save everything a transcription choice needs in one step', async 
   assert.deepEqual([saved.body.service, saved.body.comments, saved.body.fps, saved.body.show], ['local', 'all', 2, true]);
   const env = readFileSync(join(dir, '.env'), 'utf8');
   for (const line of ['TRANSCRIPTION_PROVIDER="custom"', 'TRANSCRIPTION_BASE_URL="http://127.0.0.1:8080/v1"', 'TRANSCRIPTION_MODEL="large-v3-turbo"',
-    'COMMENT_LIMIT="all"', 'FRAME_INTERVAL="0.5"', 'BROWSER_SHOW="true"']) assert.ok(env.includes(line), line);
+    'COMMENT_LIMIT="all"', 'FRAME_INTERVAL="0.5"', 'BROWSER_SHOW="true"', 'BROWSER_HEADED="true"']) assert.ok(env.includes(line), line);
   delete process.env.GROQ_API_KEY;
   assert.match((await call('/api/settings', { ...form, service: 'groq' })).body.error, /Groq API key/);
   assert.match((await call('/api/settings', { ...form, comments: 'lots' })).body.error, /whole number/);
   assert.match((await call('/api/settings', { ...form, fps: 0 })).body.error, /more than 0/);
   assert.equal(readFileSync(join(dir, '.env'), 'utf8'), env, 'a refused form changes nothing');
+});
+
+test('posts filter by type and caption, sort by a metric, and a deleted post stays deleted', async (t) => {
+  const { call, db, dir, post } = await dashboard(t);
+  const alpha = db.prepare("SELECT id FROM competitors WHERE username = 'alpha'").get().id;
+  db.prepare(`INSERT INTO posts (competitor_id, shortcode, url, type, caption, published_at, likes_count, extraction_status)
+    VALUES (?, 'AlphaReel1', 'https://www.instagram.com/reel/AlphaReel1/', 'reel', 'Summer sale 100%', '2026-08-01T10:00:00Z', 50, 'complete')`).run(alpha);
+  const codes = async (query) => (await call(`/api/posts?account=alpha&${query}`)).body.posts.map((p) => p.shortcode);
+  assert.deepEqual(await codes(''), ['AlphaPost1', 'AlphaReel1'], 'newest first by default');
+  assert.deepEqual(await codes('sort=likes'), ['AlphaReel1', 'AlphaPost1']);
+  assert.deepEqual(await codes('type=reel'), ['AlphaReel1']);
+  assert.deepEqual(await codes('q=SALE'), ['AlphaReel1'], 'caption search ignores case');
+  assert.deepEqual(await codes('q=100%25'), ['AlphaReel1']);
+  assert.deepEqual(await codes('q=1_0'), [], '_ is a literal, not a wildcard');
+  assert.equal((await call('/api/posts?account=alpha&type=reel')).body.total, 1);
+  assert.match((await call('/api/posts?account=alpha&sort=best')).body.error, /sort must be one of/);
+  assert.match((await call('/api/posts?account=alpha&type=story')).body.error, /type must be one of/);
+
+  assert.match((await call('/api/delete-posts', { ids: [] })).body.error, /ids/);
+  // The page stays open for browsing while the CLI works: it holds the dataset lock only while it changes something.
+  const cliLock = acquireDatasetLock(dir);
+  const refused = await call('/api/delete-posts', { ids: [post] });
+  assert.deepEqual([refused.status, /command-line collection/.test(refused.body.error)], [409, true]);
+  assert.equal((await call('/api/posts?account=alpha')).status, 200, 'browsing works during a CLI collection');
+  cliLock.close();
+  assert.deepEqual((await call('/api/delete-posts', { ids: [post, post, 999] })).body, { deleted: 1 });
+  assert.deepEqual(await codes(''), ['AlphaReel1']);
+  assert.equal((await call(`/api/post?id=${post}`)).status, 404);
+  assert.equal(existsSync(join(dir, 'competitors', 'alpha', 'posts', 'AlphaPost1')), false, 'its files are gone');
+  assert.equal(db.prepare('SELECT count(*) n FROM media WHERE post_id = ?').get(post).n, 0);
+  assert.equal(db.prepare('SELECT count(*) n FROM comments WHERE post_id = ?').get(post).n, 0);
+  assert.equal((await call('/api/state')).body.accounts[0].saved, 1);
+  assert.doesNotMatch(readFileSync(join(dir, 'competitors', 'alpha', 'posts.jsonl'), 'utf8'), /AlphaPost1/, 'the agent files are refreshed');
+  // Found again on the profile: known, not new, and never linked back.
+  assert.deepEqual(saveDiscovered(db, alpha, [{ shortcode: 'AlphaPost1', url: 'https://www.instagram.com/p/AlphaPost1/', type: 'image' }]).map((f) => f.isNew), [false]);
+  assert.deepEqual(await codes(''), ['AlphaReel1']);
+  assert.deepEqual((await call('/api/delete-posts', { ids: [post] })).body, { deleted: 0 }, 'deleting twice is harmless');
+});
+
+test('the CLI deletes posts by shortcode or link and prints status as JSON', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'cli-delete-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, 'raw'));
+  const db = openDatabase(join(dir, 'raw', 'collector.sqlite'));
+  migrate(db);
+  registerCompetitors(db, ['alpha']);
+  const alpha = db.prepare("SELECT id FROM competitors WHERE username = 'alpha'").get().id;
+  for (const code of ['CodeOne1', 'CodeTwo2']) db.prepare("INSERT INTO posts (competitor_id, shortcode, url) VALUES (?, ?, 'u')").run(alpha, code);
+  db.close();
+  const cli = (...args) => execFileSync(process.execPath, ['dist/cli.js', ...args], { env: { ...process.env, DATA_DIR: dir, LOG_LEVEL: 'error' }, encoding: 'utf8', stdio: 'pipe' });
+  assert.throws(() => cli('delete-post', 'CodeOne1', 'Typo9999'), (error) => /No saved post with shortcode: Typo9999\. Nothing was deleted/.test(error.stderr));
+  assert.equal(JSON.parse(cli('status', '--json'))[0].discovered, 2, 'a typo deletes nothing');
+  assert.match(cli('delete-post', 'CodeOne1', 'https://www.instagram.com/alpha/reel/CodeTwo2/?igsh=x'), /Deleted 2 post/);
+  assert.deepEqual(JSON.parse(cli('status', '--json')).map((r) => [r.username, r.discovered]), [['alpha', 0]]);
+});
+
+test('the chat runs the Claude Code already installed, limited to the collector, and resumes the conversation', async (t) => {
+  const { call, dir } = await dashboard(t);
+  const bin = join(dir, 'fake-claude');
+  const seen = join(dir, 'seen.jsonl');
+  // Stands in for `claude -p`: records what it was given and answers in stream-json.
+  writeFileSync(bin, `#!/usr/bin/env node
+let input = '';
+process.stdin.on('data', (c) => { input += c; }).on('end', () => {
+  process.getBuiltinModule('fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ args: process.argv.slice(2), input, cwd: process.cwd() }) + '\\n');
+  const out = (e) => process.stdout.write(JSON.stringify(e) + '\\n');
+  out({ type: 'system', subtype: 'init', session_id: 'sess-1' });
+  out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'node dist/cli.js scrape nike --post-limit 2' } }] } });
+  out({ type: 'assistant', message: { content: [{ type: 'text', text: 'Collected 2 posts.' }] } });
+  out({ type: 'result', is_error: false, result: 'Collected 2 posts.', session_id: 'sess-1' });
+});
+`, { mode: 0o755 });
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = bin;
+  t.after(() => { if (previous === undefined) delete process.env.CLAUDE_BIN; else process.env.CLAUDE_BIN = previous; });
+  const settled = async () => {
+    for (let i = 0; i < 100; i += 1) {
+      const { chat } = (await call('/api/state')).body;
+      if (!chat.running) return chat;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('the chat never finished');
+  };
+
+  assert.match((await call('/api/chat', { message: '  ' })).body.error, /Write a message/);
+  assert.equal((await call('/api/chat', { message: 'Collect 2 posts of @nike' })).status, 200);
+  const chat = await settled();
+  assert.deepEqual(chat.messages, [
+    { role: 'user', text: 'Collect 2 posts of @nike' },
+    { role: 'tool', text: 'node dist/cli.js scrape nike --post-limit 2' },
+    { role: 'assistant', text: 'Collected 2 posts.' },
+  ]);
+  await call('/api/chat', { message: 'And one more' });
+  await settled();
+  const [first, second] = readFileSync(seen, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(first.input, 'Collect 2 posts of @nike', 'the message goes on stdin');
+  assert.ok(first.args.includes('-p') && first.args.includes('dontAsk'));
+  assert.equal(first.args[first.args.indexOf('--allowedTools') + 1], 'Bash(node dist/cli.js *)', 'the only command it may run is the collector');
+  assert.equal(first.args[first.args.indexOf('--tools') + 1], 'Bash,Read,Grep,Glob');
+  assert.ok(existsSync(join(first.cwd, 'AGENTS.md')), 'it runs in the app folder, next to AGENTS.md');
+  assert.equal(first.args.includes('--resume'), false);
+  assert.equal(second.args[second.args.indexOf('--resume') + 1], 'sess-1', 'a follow-up continues the conversation');
+
+  await call('/api/chat/new', {});
+  assert.deepEqual((await call('/api/state')).body.chat.messages, []);
+  process.env.CLAUDE_BIN = join(dir, 'no-such-claude');
+  await call('/api/chat', { message: 'hi' });
+  assert.match((await settled()).messages.at(-1).text, /Claude Code was not found/);
 });

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type Database from 'better-sqlite3';
 import { BrowserManager } from './browser.js';
@@ -7,6 +7,7 @@ import { normalizeUsername } from './competitors.js';
 import { loadConfig, type AppConfig } from './config.js';
 import { migrate, openDatabase, throwIfStorageError } from './db.js';
 import { exportCompetitor, type ExportFormat } from './export.js';
+import { postDir } from './media-files.js';
 import { InstagramSessionManager } from './instagram-session.js';
 import type { Logger } from './logger.js';
 import { collectorStages, recentlyCompleted, runPipeline, type CollectorFlags, type PipelineRun } from './pipeline.js';
@@ -25,6 +26,35 @@ export function refreshAgentFiles(db: Database.Database, competitor: Competitor,
     throwIfStorageError(error);
     log.warn(`@${competitor.username}: could not refresh the agent files: ${(error as Error).message}`);
   }
+}
+
+/**
+ * Deletes saved posts for good: their files and collected rows go, and later collects skip them. The post row stays
+ * as a marker (deleted_at, detached from every account) because snapshots and metric history are append-only.
+ * Returns how many posts were deleted; ones already deleted or never saved are ignored.
+ */
+export function deletePosts(db: Database.Database, dataDir: string, postIds: number[], log: Logger): number {
+  const find = db.prepare(`SELECT p.id, p.shortcode, owner.id AS ownerId, owner.username AS owner FROM posts p
+    JOIN competitors owner ON owner.id = p.competitor_id WHERE p.id = ? AND p.deleted_at IS NULL`);
+  const linked = db.prepare(`SELECT c.id, c.username FROM competitors c JOIN competitor_posts cp ON cp.competitor_id = c.id WHERE cp.post_id = ?`);
+  const touched = new Map<number, Competitor>();
+  let deleted = 0;
+  for (const id of new Set(postIds)) {
+    const post = find.get(id) as { id: number; shortcode: string; ownerId: number; owner: string } | undefined;
+    if (!post) continue;
+    touched.set(post.ownerId, { id: post.ownerId, username: post.owner });
+    for (const c of linked.all(id) as Competitor[]) touched.set(c.id, c);
+    db.transaction(() => {
+      for (const table of ['media', 'comments', 'reel_frames', 'transcripts', 'competitor_posts']) db.prepare(`DELETE FROM ${table} WHERE post_id = ?`).run(id);
+      db.prepare("UPDATE posts SET competitor_id = NULL, deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?").run(id);
+    })();
+    // Files go after the rows commit: a failure here leaves stray files, never a post pointing at missing ones.
+    rmSync(postDir(dataDir, post.owner, post.shortcode), { recursive: true, force: true });
+    log.info(`@${post.owner}: deleted post ${post.shortcode}.`);
+    deleted += 1;
+  }
+  for (const competitor of touched.values()) refreshAgentFiles(db, competitor, dataDir, log);
+  return deleted;
 }
 
 export function resolveCompetitors(db: Database.Database, targets: string[]): Competitor[] {

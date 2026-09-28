@@ -51,8 +51,9 @@ COMMENTS="$(ask "Comments to save per post (number, or 'all')" "100")"
 FPS="$(ask "Images to save per second of video" "1")"
 BROWSER="$(ask "Show the browser window while collecting? (yes/no)" "no")"
 INTERVAL="$(node -e "const n=Number(process.argv[1]);process.stdout.write(Number.isFinite(n)&&n>0?String(1/n):'1')" "$FPS")"
-case "$BROWSER" in y|Y|yes|YES|Yes) HEADED=true ;; *) HEADED=false ;; esac
-set_setting "POST_LIMIT=$POSTS" "COMMENT_LIMIT=$COMMENTS" "FRAME_INTERVAL=$INTERVAL" "BROWSER_HEADED=$HEADED"
+# Hidden stays headed: a headless browser gets a degraded page from Instagram.
+case "$BROWSER" in y|Y|yes|YES|Yes) SHOW=true ;; *) SHOW=false ;; esac
+set_setting "POST_LIMIT=$POSTS" "COMMENT_LIMIT=$COMMENTS" "FRAME_INTERVAL=$INTERVAL" "BROWSER_HEADED=true" "BROWSER_SHOW=$SHOW"
 
 printf '\n\033[1;32mSaved.\033[0m Data folder: %s\n' "$DATA_DIR" >&2
 printf 'Change anything later in the dashboard (Settings) or by running: instagram-scraper setup\n' >&2

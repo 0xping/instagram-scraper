@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { countSaved, decide, normalizePostUrl, parseTimelineResponse, readCheckpoint, saveDiscovered, writeCheckpoint } from '../dist/discovery.js';
+import { countSaved, decide, normalizePostUrl, parseTimelineResponse, readCheckpoint, saveDiscovered, unseenWithinLimit, writeCheckpoint } from '../dist/discovery.js';
 import { listCompetitors } from '../dist/competitors.js';
 import { migrate, openDatabase } from '../dist/db.js';
 
@@ -131,4 +131,12 @@ test('saveDiscovered is idempotent, links collabs, and reports when each post be
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a post limit keeps only the newest posts it allows from a grid page, never the whole page', () => {
+  const page = Array.from({ length: 12 }, (_, i) => ({ shortcode: `Code${i}xx`, url: `https://www.instagram.com/p/Code${i}xx/`, type: 'image' }));
+  assert.deepEqual(unseenWithinLimit(page, new Set(), 2).map((p) => p.shortcode), ['Code0xx', 'Code1xx']);
+  assert.deepEqual(unseenWithinLimit(page, new Set(['Code0xx']), 2).map((p) => p.shortcode), ['Code1xx'], 'one already seen: one more');
+  assert.deepEqual(unseenWithinLimit(page, new Set(['Code0xx', 'Code1xx']), 2), []);
+  assert.equal(unseenWithinLimit(page, new Set(), null).length, 12);
 });

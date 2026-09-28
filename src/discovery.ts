@@ -186,14 +186,16 @@ export interface SavedFlag {
  * under another competitor (a collab) gets a link, not a second row. Returns a flag per post, in order.
  */
 export function saveDiscovered(db: Database.Database, competitorId: number, posts: DiscoveredPost[]): SavedFlag[] {
-  const findPost = db.prepare('SELECT id, competitor_id AS competitorId, discovered_at AS discoveredAt FROM posts WHERE shortcode = ?');
+  const findPost = db.prepare('SELECT id, competitor_id AS competitorId, discovered_at AS discoveredAt, deleted_at AS deletedAt FROM posts WHERE shortcode = ?');
   const linkedAt = db.prepare('SELECT discovered_at AS at FROM competitor_posts WHERE competitor_id = ? AND post_id = ?');
   const insertPost = db.prepare(`INSERT INTO posts (competitor_id, shortcode, url, type, discovery_status)
     VALUES (?, ?, ?, ?, 'complete')`);
   const fillType = db.prepare(`UPDATE posts SET type = ? WHERE id = ? AND type = 'unknown' AND ? != 'unknown'`);
   const link = db.prepare('INSERT OR IGNORE INTO competitor_posts (competitor_id, post_id) VALUES (?, ?)');
   return db.transaction(() => posts.map((post): SavedFlag => {
-    const existing = findPost.get(post.shortcode) as { id: number; competitorId: number | null; discoveredAt: string } | undefined;
+    const existing = findPost.get(post.shortcode) as { id: number; competitorId: number | null; discoveredAt: string; deletedAt: string | null } | undefined;
+    // Deleted on purpose: known since it was first found, and never linked back to an account.
+    if (existing?.deletedAt) return { isNew: false, knownSince: existing.discoveredAt };
     if (!existing) {
       const id = insertPost.run(competitorId, post.shortcode, post.url, post.type).lastInsertRowid;
       link.run(competitorId, id);
@@ -329,7 +331,7 @@ export async function discoverPosts(
         const post = normalizePostUrl(href);
         if (post) batch.push(post);
       }
-      const fresh = dedupe(batch).filter((post) => !seen.has(post.shortcode));
+      const fresh = unseenWithinLimit(batch, seen, limit);
 
       if (fresh.length > 0) {
         const flags = saveDiscovered(db, competitor.id, fresh);
@@ -420,6 +422,15 @@ export async function discoverPosts(
     context.off('response', onResponse);
     await page?.close().catch(() => undefined);
   }
+}
+
+/**
+ * The posts of a batch not seen yet, cut to what POST_LIMIT still allows. One grid page holds a dozen posts or more,
+ * so without the cut asking for 2 saves the whole page, and every later stage processes all of it.
+ */
+export function unseenWithinLimit(batch: DiscoveredPost[], seen: Set<string>, limit: number | null): DiscoveredPost[] {
+  const fresh = dedupe(batch).filter((post) => !seen.has(post.shortcode));
+  return limit === null ? fresh : fresh.slice(0, Math.max(0, limit - seen.size));
 }
 
 function dedupe(posts: DiscoveredPost[]): DiscoveredPost[] {

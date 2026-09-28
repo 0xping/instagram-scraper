@@ -80,7 +80,9 @@ Run `instagram-scraper` (or double-click `Start.command` / `Start.bat`). The app
 
    Lines that are not usernames are skipped and counted.
 3. **Collect.** After adding, press **Collect them** in the message, or **Collect all** (it skips accounts collected in the last day), or **Collect** on one account. It asks how many posts: *@brand has 1,000 posts: all, or the newest N?* (All is the default). Progress shows at the top with a **Stop** button. It keeps going if you close the tab, and launching the app again reopens the same page.
-4. **Review.** Click an account for its posts, and a post for its video or photos, caption, speech and top comments. **Open folder** and **Open on Instagram** are there too.
+4. **Review.** Click an account for its posts, and a post for its video or photos, caption, speech and top comments. **Open folder** and **Open on Instagram** are there too. Above the grid, search captions, pick a type (Reels, Carousels, Photos) and sort by newest, oldest, or most likes, comments or views.
+5. **Ask Claude.** If Claude Code is installed and logged in on this computer, **Ask Claude** at the top opens a chat beside the page: *collect the newest 2 posts of @brand*, or *which of their Reels got the most comments?* It uses your own Claude plan, with no API key. It can read your data and run the collector's commands, nothing else, and it asks before deleting anything. Posts it collects show up on the page as they're saved. If Claude Code is installed somewhere unusual, set `CLAUDE_BIN` in `.env` to its path.
+6. **Delete a post.** In a post, **Delete post** removes its photos, video, comments and transcript from this computer, and collecting again skips it. It is refused while a collect is running.
 
 The **⋯** menu at the top has *Open data folder*, *Export all accounts* (JSON and CSV, then the folder opens) and *Settings* (video speech to text, comments per post, video images per second, show the browser). The **⋯** on an account exports just that account or hides it (its data stays; add it again to bring it back). When some posts of an account failed, a **Retry** bar appears on its page.
 
@@ -108,6 +110,13 @@ competitors/<account>/
 ```
 
 The tool stores and describes; it does no analysis. **Export data** is still there for CSV files or a copy somewhere else.
+
+### Letting an AI agent run it
+
+An agent can drive the tool as well as read its data; [AGENTS.md](AGENTS.md) is written for it. In short:
+
+- **The CLI** works whether or not the dashboard is open, so you can keep the page open to browse while an agent collects; its posts appear as they're saved. For example: `instagram-scraper cli scrape NAME --post-limit 2`, `instagram-scraper cli status --json`, `instagram-scraper cli delete-post SHORTCODE`. Errors go to stderr with a non-zero exit code. Only one collection runs at a time, so while the dashboard is collecting, the CLI waits its turn.
+- **The dashboard's local API**: the address, key included, is in `<data>/browser/dashboard-url`. Send the key (the `t=` part) as an `x-token` header. `GET /api/state` returns accounts and progress, `GET /api/posts?account=NAME&type=reel&q=TEXT&sort=likes` lists posts, and `POST /api/delete-posts` with `{"ids":[...]}` deletes posts.
 
 ### Transcripts
 
@@ -144,7 +153,7 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-`.env` accepts `DATA_DIR` (default `./data`) and `LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`). Browser settings are `BROWSER_HEADED` (default `true`; `false` runs headless, see profile collection below), `BROWSER_SHOW` (default `false`, which moves the headed window off screen so it stays out of the way and data stays exact; the login window always shows), `BROWSER_CHANNEL` (which installed browser to drive; default `chrome`, empty uses Playwright's bundled Chromium), `BROWSER_KEEP_PROFILE` (default `true`; keeps one profile in `<data>/browser/profile` so Instagram sees the same device each run), `NAVIGATION_TIMEOUT_MS` (default `30000`) and `LOGIN_TIMEOUT_MS` (how long `instagram:login` waits for you; default `600000`). Discovery settings are `DISCOVERY_SCROLL_DELAY_MS` (base pause after each scroll; default `2500`) and `DISCOVERY_MAX_IDLE_SCROLLS` (scrolls in a row with nothing new before the end is checked; default `5`). Relative data paths resolve from the directory where you run the CLI, and so does `competitors.txt`.
+`.env` accepts `DATA_DIR` (default `./data`) and `LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`). Browser settings are `BROWSER_HEADED` (default `true`; `false` runs headless, see profile collection below), `BROWSER_SHOW` (default `false`, which moves the headed window off screen and minimizes it to the Dock or taskbar, so it stays out of the way and data stays exact; the login window always shows. Setup and the dashboard's Settings write this, never `BROWSER_HEADED=false`), `BROWSER_CHANNEL` (which installed browser to drive; default `chrome`, empty uses Playwright's bundled Chromium), `BROWSER_KEEP_PROFILE` (default `true`; keeps one profile in `<data>/browser/profile` so Instagram sees the same device each run), `NAVIGATION_TIMEOUT_MS` (default `30000`) and `LOGIN_TIMEOUT_MS` (how long `instagram:login` waits for you; default `600000`). Discovery settings are `DISCOVERY_SCROLL_DELAY_MS` (base pause after each scroll; default `2500`) and `DISCOVERY_MAX_IDLE_SCROLLS` (scrolls in a row with nothing new before the end is checked; default `5`). Relative data paths resolve from the directory where you run the CLI, and so does `competitors.txt`.
 
 ```sh
 npm run dev -- init

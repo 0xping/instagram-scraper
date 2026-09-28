@@ -23,15 +23,16 @@ import { formatTable } from './competitors.js';
 import { type ExportFormat } from './export.js';
 import { createTranscriptionProvider } from './transcription-provider.js';
 import { formatTranscriptRun, processCompetitorTranscripts } from './transcripts.js';
-import { exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors, type CollectorHandle } from './runner.js';
+import { deletePosts, exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors, type CollectorHandle } from './runner.js';
 
-const usage = `Usage: npm run dev -- <command>
+const usage = `Usage: instagram-scraper cli <command>   (in a checkout: npm run dev -- <command>)
 
 Commands:
   init      Create data directories and migrate SQLite
   competitors-import  Import usernames from competitors.txt into SQLite (safe to rerun)
   competitors-list    Show each competitor's status, post counts, and last scrape
-  status    Per-competitor table: discovered, metadata, media, failed, last scrape
+  status [--json]   Per-competitor table: discovered, metadata, media, failed, last scrape.
+                    --json prints the same rows as a JSON array, for scripts and AI agents
   instagram-login   Log in to Instagram manually in a browser and save the session
   instagram-status  Check that the saved Instagram session is still logged in
   instagram-cookies [--paste]
@@ -65,6 +66,9 @@ Commands:
                     Retryable failures under the attempt cap only, unless --include-permanent.
   export <username...> | --all [--format json|csv|all] [--out DIR] [--no-raw]
                     Write competitor data for analysis to data/exports/<username>/ (default: both formats)
+  delete-post <shortcode|post URL...>
+                    Delete saved posts for good: files and collected data go, and later collects
+                    skip them. Shortcodes are in posts.jsonl and the post folder names
   settings-set KEY=value ...
                     Write settings to .env the way the dashboard does (used by setup)
   help      Show this message`;
@@ -100,6 +104,24 @@ function settingsSetCommand(args: string[]): void {
   process.stdout.write(`Saved: ${Object.keys(changes).join(', ')}\n`);
 }
 
+/** `delete-post <shortcode|url...>`: every name must match a saved post, so a typo never deletes a different one. */
+function deletePostCommand(args: string[]): void {
+  if (!args.length) throw new Error('Usage: delete-post <shortcode|post URL...>');
+  const shortcodes = args.map((arg) => /instagram\.com\/(?:[\w.]+\/)?(?:p|reels?|tv)\/([\w-]+)/.exec(arg)?.[1] ?? arg);
+  const config = loadConfig();
+  const log = createLogger(config.logLevel);
+  const db = openDatabase(dataPaths(config.dataDir).database);
+  try {
+    const find = db.prepare('SELECT id FROM posts WHERE shortcode = ? AND deleted_at IS NULL');
+    const ids = shortcodes.map((code) => (find.get(code) as { id: number } | undefined)?.id);
+    const missing = shortcodes.filter((_, i) => ids[i] === undefined);
+    if (missing.length) throw new Error(`No saved post with shortcode: ${missing.join(', ')}. Nothing was deleted.`);
+    process.stdout.write(`Deleted ${deletePosts(db, config.dataDir, ids as number[], log)} post(s).\n`);
+  } finally {
+    db.close();
+  }
+}
+
 async function runCommand(args: string[]): Promise<void> {
   const command = args[0];
   if (command === 'help' || command === '--help' || command === undefined) {
@@ -118,9 +140,10 @@ async function runCommand(args: string[]): Promise<void> {
   if (command === 'frames') return framesCommand(args.slice(1));
   if (command === 'transcripts') return transcriptsCommand(args.slice(1));
   if (command === 'settings-set') return settingsSetCommand(args.slice(1));
+  if (command === 'delete-post') return deletePostCommand(args.slice(1));
   const single = ['init', 'status', 'competitors-import', 'competitors-list', 'instagram-login', 'instagram-status', 'instagram-cookies'];
-  const paste = command === 'instagram-cookies' && args[1] === '--paste';
-  if (!single.includes(command) || args.length > (paste ? 2 : 1)) {
+  const flag = (command === 'instagram-cookies' && args[1] === '--paste') || (command === 'status' && args[1] === '--json');
+  if (!single.includes(command) || args.length > (flag ? 2 : 1)) {
     throw new Error(`Unknown command.\n${usage}`);
   }
 
@@ -145,7 +168,7 @@ async function runCommand(args: string[]): Promise<void> {
       if (command === 'instagram-login') await session.login();
       else if (command === 'instagram-cookies') {
         let pasted: string | undefined;
-        if (paste) {
+        if (args[1] === '--paste') {
           process.stdout.write('Paste the Instagram cookies (sessionid=...; ds_user_id=...; csrftoken=...), then press Ctrl-D:\n');
           pasted = '';
           for await (const chunk of process.stdin) pasted += chunk as string;
@@ -184,7 +207,8 @@ async function runCommand(args: string[]): Promise<void> {
     } else {
       migrate(db);
       const rows = competitorStatus(db);
-      process.stdout.write(rows.length ? `${formatStatus(rows)}\n` : 'No competitors saved. Run: npm run competitors:import\n');
+      if (args[1] === '--json') process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+      else process.stdout.write(rows.length ? `${formatStatus(rows)}\n` : 'No competitors saved. Run: npm run competitors:import\n');
     }
   } finally {
     db.close();

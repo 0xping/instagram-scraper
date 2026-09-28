@@ -16,47 +16,44 @@ async function main(): Promise<void> {
     chmodSync(envPath, 0o600);
   }
   const config = loadConfig();
-  // The running dashboard's address, so launching again reopens it instead of failing on the dataset lock.
+  // The running dashboard's address, so launching again reopens it instead of starting a second one.
   const urlFile = join(config.dataDir, 'browser', 'dashboard-url');
-  let lock;
-  try {
-    lock = acquireDatasetLock(config.dataDir);
-  } catch (error) {
-    const url = existsSync(urlFile) ? readFileSync(urlFile, 'utf8').trim() : '';
-    if (url && (await fetch(url).then((r) => r.ok, () => false))) {
-      process.stdout.write(`The dashboard is already open: ${url}\n`);
-      await openAppUrl(url).catch(() => undefined);
-      return;
-    }
-    throw error;
+  const running = existsSync(urlFile) ? readFileSync(urlFile, 'utf8').trim() : '';
+  if (running && (await fetch(running).then((r) => r.ok, () => false))) {
+    process.stdout.write(`The dashboard is already open: ${running}\n`);
+    await openAppUrl(running).catch(() => undefined);
+    return;
   }
+  // The dataset lock is held only to set up, then only while a task runs, so CLI commands work beside the page.
+  // A CLI collecting right now keeps its lock: its jobs are its own, and the page shows them as it saves.
+  ensureDataDirs(config.dataDir);
+  const db = openDatabase(dataPaths(config.dataDir).database);
   try {
-    ensureDataDirs(config.dataDir);
-    const db = openDatabase(dataPaths(config.dataDir).database);
+    let lock = null;
+    try { lock = acquireDatasetLock(config.dataDir); } catch (error) { if (!/Another collector command/.test((error as Error).message)) throw error; }
     try {
-      migrate(db);
-      recoverInterruptedJobs(db);
-      const dashboard = await startDashboard({ db, dataDir: config.dataDir, envPath });
-      mkdirSync(dirname(urlFile), { recursive: true });
-      writeFileSync(urlFile, `${dashboard.url}\n`, { mode: 0o600 });
-      process.stdout.write(`\nDashboard: ${dashboard.url}\n\nIt opens in your browser. Keep this window open while you use it; Ctrl+C quits.\n\n`);
-      await openAppUrl(dashboard.url).catch(() => process.stdout.write('Open the address above in your browser.\n'));
-      await new Promise<void>((done) => {
-        const quit = (): void => {
-          process.stdout.write('Stopping… (press Ctrl+C again to force)\n');
-          process.once('SIGINT', () => process.exit(130));
-          done();
-        };
-        process.once('SIGINT', quit);
-        process.once('SIGTERM', quit);
-      });
-      rmSync(urlFile, { force: true });
-      await dashboard.close();
+      if (lock) { migrate(db); recoverInterruptedJobs(db); }
     } finally {
-      db.close();
+      lock?.close();
     }
+    const dashboard = await startDashboard({ db, dataDir: config.dataDir, envPath });
+    mkdirSync(dirname(urlFile), { recursive: true });
+    writeFileSync(urlFile, `${dashboard.url}\n`, { mode: 0o600 });
+    process.stdout.write(`\nDashboard: ${dashboard.url}\n\nIt opens in your browser. Keep this window open while you use it; Ctrl+C quits.\n\n`);
+    await openAppUrl(dashboard.url).catch(() => process.stdout.write('Open the address above in your browser.\n'));
+    await new Promise<void>((done) => {
+      const quit = (): void => {
+        process.stdout.write('Stopping… (press Ctrl+C again to force)\n');
+        process.once('SIGINT', () => process.exit(130));
+        done();
+      };
+      process.once('SIGINT', quit);
+      process.once('SIGTERM', quit);
+    });
+    rmSync(urlFile, { force: true });
+    await dashboard.close();
   } finally {
-    lock.close();
+    db.close();
   }
 }
 
