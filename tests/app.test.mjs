@@ -54,7 +54,7 @@ test('pasted text and imported files give usernames, and archiving preserves dat
 test('settings preserve other entries and comments, keep secrets private, and validate before writing', () => {
   const dir = mkdtempSync(join(tmpdir(), 'app-settings-'));
   const file = join(dir, '.env');
-  const keys = ['GROQ_API_KEY', 'TRANSCRIPTION_PROVIDER', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_HEADED'];
+  const keys = ['GROQ_API_KEY', 'TRANSCRIPTION_PROVIDER', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_HEADED', 'BROWSER_SHOW', 'POST_LIMIT'];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   try {
     writeFileSync(file, '# keep me\nUNKNOWN=value\nFRAME_INTERVAL=2\n', { mode: 0o644 });
@@ -68,6 +68,11 @@ test('settings preserve other entries and comments, keep secrets private, and va
     assert.throws(() => saveSettings(file, { FRAME_INTERVAL: '0' }), /positive/);
     assert.equal(readFileSync(file, 'utf8'), text);
     assert.equal(process.env.FRAME_INTERVAL, '1.5');
+    // What setup writes: every one of its answers must be accepted, and a bad one refused before anything is written.
+    saveSettings(file, { POST_LIMIT: '20', COMMENT_LIMIT: '100', FRAME_INTERVAL: '1', BROWSER_HEADED: 'true', BROWSER_SHOW: 'false' });
+    assert.match(readFileSync(file, 'utf8'), /POST_LIMIT="20"/);
+    saveSettings(file, { POST_LIMIT: 'all' });
+    assert.throws(() => saveSettings(file, { POST_LIMIT: 'twenty' }), /POST_LIMIT must be a positive integer/);
   } finally {
     for (const key of keys) {
       if (previous[key] === undefined) delete process.env[key];
