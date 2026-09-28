@@ -27,3 +27,6 @@ PLAN-*.md
 models/
 whisper.cpp/
 .node/
+# Written by the installer and the update check.
+.version
+.update-check

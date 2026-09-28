@@ -11,7 +11,7 @@ const SETTLE_MS = 1500;
 const LOAD_WAIT_MS = 10_000;
 
 // URL/DOM heuristics only: Instagram's page text is localized and changes often.
-const CHALLENGE_PATH = /^\/(challenge|auth_platform|accounts\/suspended|accounts\/login\/two_factor)(\/|$)/;
+export const CHALLENGE_PATH = /^\/(challenge|auth_platform|accounts\/suspended|accounts\/login\/two_factor)(\/|$)/;
 const CHALLENGE_SELECTOR = [
   'iframe[src*="recaptcha"]',
   'iframe[src*="hcaptcha"]',

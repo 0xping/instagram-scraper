@@ -61,7 +61,7 @@ Change any of it later in the dashboard under **Settings**, or run `instagram-sc
 
 **Whisper on this computer is optional and not bundled.** Choose it during setup (or run `instagram-scraper whisper install`) and the installer fetches whisper.cpp — Homebrew on macOS, built from source on Linux — plus the model you pick. Building it is the one step that needs a compiler: on a new Mac it offers to install the command line tools and Homebrew first, and if you say no it says so and leaves transcription off rather than failing quietly. Groq needs none of that, then starts the server and points the collector at it. Afterwards: `instagram-scraper whisper start | stop | status`.
 
-Update later with `instagram-scraper update`, and remove everything with `instagram-scraper uninstall` (your collected data is kept unless you confirm twice).
+When a new version is out, the dashboard shows an **Update now** button and the CLI prints a one-line notice (checked at most twice a day). Update with that button or `instagram-scraper update`, and remove everything with `instagram-scraper uninstall` (your collected data is kept unless you confirm twice).
 
 **macOS without a terminal**: download the repository, then double-click `Install.command` once and `Start.command` to run it. Both do exactly what the line above does, in the folder you downloaded.
 
@@ -81,7 +81,7 @@ Run `instagram-scraper` (or double-click `Start.command` / `Start.bat`). The app
    Lines that are not usernames are skipped and counted.
 3. **Collect.** After adding, press **Collect them** in the message, or **Collect all** (it skips accounts collected in the last day), or **Collect** on one account. It asks how many posts: *@brand has 1,000 posts: all, or the newest N?* (All is the default). Progress shows at the top with a **Stop** button. It keeps going if you close the tab, and launching the app again reopens the same page.
 4. **Review.** Click an account for its posts, and a post for its video or photos, caption, speech and top comments. **Open folder** and **Open on Instagram** are there too. Above the grid, search captions, pick a type (Reels, Carousels, Photos) and sort by newest, oldest, or most likes, comments or views.
-5. **Ask Claude.** If Claude Code is installed and logged in on this computer, **Ask Claude** at the top opens a chat beside the page: *collect the newest 2 posts of @brand*, or *which of their Reels got the most comments?* It uses your own Claude plan, with no API key. It can read your data and run the collector's commands, nothing else, and it asks before deleting anything. Posts it collects show up on the page as they're saved. If Claude Code is installed somewhere unusual, set `CLAUDE_BIN` in `.env` to its path.
+5. **Work with Claude.** If Claude Code is installed and logged in on this computer, **Claude** at the top opens it in a terminal beside the page. It's the normal Claude Code, on your own plan, started in the app folder where it already knows the tool. Ask it to *collect the newest 2 posts of @brand*, or *which of their Reels got the most comments?*, and watch the posts appear on the page. Collector commands run without asking; anything else, deleting posts, or overriding the Instagram limits asks you first, right in that terminal. It keeps running if you close the tab, and the same session is open at claude.ai/code. If Claude Code is somewhere unusual, set `CLAUDE_BIN` in `.env` to its path.
 6. **Delete a post.** In a post, **Delete post** removes its photos, video, comments and transcript from this computer, and collecting again skips it. It is refused while a collect is running.
 
 The **⋯** menu at the top has *Open data folder*, *Export all accounts* (JSON and CSV, then the folder opens) and *Settings* (video speech to text, comments per post, video images per second, show the browser). The **⋯** on an account exports just that account or hides it (its data stays; add it again to bring it back). When some posts of an account failed, a **Retry** bar appears on its page.
@@ -113,7 +113,11 @@ The tool stores and describes; it does no analysis. **Export data** is still the
 
 ### Letting an AI agent run it
 
-An agent can drive the tool as well as read its data; [AGENTS.md](AGENTS.md) is written for it. In short:
+An agent can drive the tool as well as read its data; [AGENTS.md](AGENTS.md) is written for it.
+
+**With Claude Code**, press **Claude** in the dashboard (see *Using it*), or run `instagram-scraper claude` to use it in your own terminal window. That opens the dashboard in your browser (or reuses one already open) and starts an ordinary Claude Code session in the app folder, where it already knows how to use the tool. Talk to it in the terminal, or at **claude.ai/code** or in the Claude app, since Remote Control is on. Posts it collects appear in the dashboard as they're saved. Quitting Claude closes the dashboard it opened. Collector commands run without asking; deleting posts or overriding the Instagram limits (below) still asks you first. It uses your own Claude plan.
+
+In short:
 
 - **The CLI** works whether or not the dashboard is open, so you can keep the page open to browse while an agent collects; its posts appear as they're saved. For example: `instagram-scraper cli scrape NAME --post-limit 2`, `instagram-scraper cli status --json`, `instagram-scraper cli delete-post SHORTCODE`. Errors go to stderr with a non-zero exit code. Only one collection runs at a time, so while the dashboard is collecting, the CLI waits its turn.
 - **The dashboard's local API**: the address, key included, is in `<data>/browser/dashboard-url`. Send the key (the `t=` part) as an `x-token` header. `GET /api/state` returns accounts and progress, `GET /api/posts?account=NAME&type=reel&q=TEXT&sort=likes` lists posts, and `POST /api/delete-posts` with `{"ids":[...]}` deletes posts.
@@ -130,6 +134,13 @@ Open **Settings → Video speech to text** and pick one:
 | Another Whisper server | — | Any server speaking the same API |
 
 The dashboard saves everything the choice needs, so you never edit a config file.
+
+### Protecting the Instagram account
+
+Collecting is automated activity, which is against Instagram's terms, and Instagram can respond by limiting or disabling the account that does it. **Collect with a spare account, never your main or business one.** On top of pausing between pages, the tool protects the account in two ways:
+
+- **A daily limit**, 300 Instagram pages by default (a profile or a post each count as one). A run that reaches it stops the way Stop does, so nothing is lost, and the rest waits until after midnight. Change it in Settings or with `DAILY_PAGE_LIMIT` (`all` means no limit). The account list shows today's count.
+- **A day's pause** after Instagram pushes back ("too many requests", or a security check). No collection starts for 24 hours, and the dashboard says until when. You can collect anyway (**Collect anyway** in the dashboard, `scrape --ignore-limits` in the CLI), but that is exactly when an account gets flagged.
 
 ## Please use it responsibly
 

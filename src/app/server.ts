@@ -3,6 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import type { AddressInfo } from 'node:net';
 import type Database from 'better-sqlite3';
 import { chromium } from 'playwright';
@@ -14,16 +15,25 @@ import { saveSettings } from '../env-file.js';
 import { checkFfmpeg } from '../frames.js';
 import { connectWithCookies } from '../instagram-cookies.js';
 import { InstagramSessionManager, ManualInterventionError, SessionExpiredError } from '../instagram-session.js';
+import { assertMayCollect, instagramPause, pagesToday } from '../instagram-limits.js';
 import { createLogger, redactLog, type Logger } from '../logger.js';
 import { postDir } from '../media-files.js';
 import { openDataPath, resolveDataPath } from '../open-path.js';
 import { dataPaths } from '../paths.js';
 import { formatPipelineSummary, pipelineTotals } from '../pipeline.js';
 import { deletePosts, exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors } from '../runner.js';
-import { createChat } from './chat.js';
+import { spawn } from 'node:child_process';
+import { updateAvailable } from '../update-check.js';
+import { createTerminal } from './terminal.js';
 import { parseAccountList } from './model.js';
 
 const PAGE = new URL('../../src/app/page.html', import.meta.url);
+const vendorFile = (id: string): string => createRequire(import.meta.url).resolve(id);
+const VENDOR: Record<string, { file: string; type: string }> = {
+  '/vendor/xterm.js': { file: vendorFile('@xterm/xterm/lib/xterm.js'), type: 'text/javascript; charset=utf-8' },
+  '/vendor/xterm.css': { file: vendorFile('@xterm/xterm/css/xterm.css'), type: 'text/css; charset=utf-8' },
+  '/vendor/addon-fit.js': { file: vendorFile('@xterm/addon-fit/lib/addon-fit.js'), type: 'text/javascript; charset=utf-8' },
+};
 const LOCAL_WHISPER = 'http://127.0.0.1:8080/v1';
 const WHISPER_MODEL = 'large-v3-turbo';
 const MEDIA_TYPES: Record<string, string> = {
@@ -48,7 +58,8 @@ interface Task {
   results: Record<string, string>;
 }
 class HttpError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  /** `extra` goes out with the message, for the page to act on (for example, that it may collect anyway). */
+  constructor(readonly status: number, message: string, readonly extra: Record<string, unknown> = {}) { super(message); }
 }
 
 /**
@@ -120,8 +131,12 @@ function createCollector(db: Database.Database, dataDir: string) {
     void browser?.close();
   }
 
-  function collect(targets: string[] | 'all', maxPosts: number | null): void {
+  function collect(targets: string[] | 'all', maxPosts: number | null, ignoreLimits = false): void {
     if (session !== 'connected') throw new HttpError(409, 'Connect Instagram first.');
+    // Refused here, not inside the task, so the page can offer to collect anyway.
+    if (!ignoreLimits) {
+      try { assertMayCollect(db, config().dailyPageLimit); } catch (error) { throw new HttpError(409, (error as Error).message, { canOverride: true }); }
+    }
     const competitors = resolveCompetitors(db, targets === 'all' ? ['--all'] : targets);
     if (!competitors.length) throw new HttpError(400, 'Add an account first.');
     const label = competitors.length === 1 ? `Collecting @${competitors[0]!.username}` : `Collecting ${competitors.length} accounts`;
@@ -129,7 +144,7 @@ function createCollector(db: Database.Database, dataDir: string) {
       const settings = config();
       settings.discovery.maxPosts = maxPosts;
       browser = new BrowserManager({ ...settings.browser }, log);
-      const handle = await openCollector({ log, signal, config: settings, targets: competitors.map((c) => c.username), browser });
+      const handle = await openCollector({ log, signal, config: settings, targets: competitors.map((c) => c.username), browser, ignoreLimits });
       browser = handle.browser;
       session = 'connected';
       try {
@@ -162,7 +177,7 @@ function createCollector(db: Database.Database, dataDir: string) {
       const handle = browser ? await openCollector({ log, signal, config: settings, targets: [username], browser }) : null;
       try {
         const result = await retryFailed(handle?.db ?? db, handle ? { context: handle.context, session: handle.session } : null,
-          competitors, stages, { config: settings, log, signal, includePermanent: false, dryRun: false });
+          competitors, stages, { config: settings, log, signal: handle?.signal ?? signal, includePermanent: false, dryRun: false });
         log.info(`Retry: ${result.rows.reduce((n, r) => n + r.fixed, 0)} fixed; ${result.failed ? 'some still fail' : 'done'}.`);
       } finally {
         await handle?.close();
@@ -199,7 +214,8 @@ function createCollector(db: Database.Database, dataDir: string) {
     work('check', 'Checking the Instagram login', [], async (signal) => {
       const settings = config();
       browser = new BrowserManager({ ...settings.browser }, log);
-      const handle = await openCollector({ log, signal, config: settings, targets: ['--all'], browser });
+      // Only the home page: a session check is not a collection.
+      const handle = await openCollector({ log, signal, config: settings, targets: ['--all'], browser, ignoreLimits: true });
       session = 'connected';
       await handle.close();
     });
@@ -278,6 +294,7 @@ function state(db: Database.Database, collector: Collector, setup: string[]) {
       ...describe(r, r.jobStatus === 'running'),
     })),
     logs: collector.logs.slice(-150),
+    instagram: { pagesToday: pagesToday(db), limit: collector.config().dailyPageLimit, pause: instagramPause(db) },
   };
 }
 
@@ -354,6 +371,7 @@ function settings(config: AppConfig) {
     comments: config.commentLimit === null ? 'all' : String(config.commentLimit),
     fps: Number((1 / config.frameInterval).toFixed(2)),
     show: config.browser.show,
+    dailyLimit: config.dailyPageLimit === null ? 'all' : String(config.dailyPageLimit),
   };
 }
 
@@ -383,6 +401,9 @@ function saveFromForm(envPath: string, body: Record<string, unknown>): void {
   changes.BROWSER_SHOW = body.show === true ? 'true' : 'false';
   // Hidden means off screen, never headless (Instagram degrades headless pages); this also repairs older setups.
   changes.BROWSER_HEADED = 'true';
+  const daily = text('dailyLimit').toLowerCase();
+  if (daily !== 'all' && !/^[1-9]\d*$/.test(daily)) throw new HttpError(400, 'Instagram pages per day must be a whole number, or all.');
+  changes.DAILY_PAGE_LIMIT = daily;
   saveSettings(envPath, changes);
 }
 
@@ -443,12 +464,23 @@ export async function startDashboard(options: {
   db: Database.Database; dataDir: string; envPath: string; port?: number; checkSession?: boolean;
   /** Opens a folder in the file manager; tests replace it so nothing pops up. */
   open?: (dataDir: string, path: string) => Promise<void>;
+  /** What the Claude terminal runs; tests replace Claude Code with a small program. */
+  terminalCommand?: () => { file: string; args: string[] };
 }) {
   const { db, dataDir, envPath } = options;
   const open = options.open ?? openDataPath;
   const token = randomBytes(24).toString('base64url');
   const collector = createCollector(db, dataDir);
-  const chat = createChat({ appDir: fileURLToPath(new URL('../../', import.meta.url)), dataDir });
+  const appDir = fileURLToPath(new URL('../../', import.meta.url));
+  let update = false;
+  const terminal = createTerminal({ appDir, command: options.terminalCommand });
+  const size = (body: Record<string, unknown>): [number, number] => {
+    const cols = Number(body.cols);
+    const rows = Number(body.rows);
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 2 || rows < 2 || cols > 1000 || rows > 1000) throw new HttpError(400, 'Bad terminal size.');
+    return [cols, rows];
+  };
+  void updateAvailable(appDir).then((newer) => { update = newer; });
   const setup = setupProblems();
   const page = readFileSync(PAGE);
   let host = '';
@@ -460,14 +492,31 @@ export async function startDashboard(options: {
   };
 
   const routes: Record<string, (body: Record<string, unknown>, url: URL) => unknown> = {
-    'GET /api/state': () => { checkSession(); return { ...state(db, collector, setup), chat: chat.state() }; },
-    'POST /api/chat': (body) => {
-      const text = typeof body.message === 'string' ? body.message.trim() : '';
-      if (!text) throw new HttpError(400, 'Write a message.');
-      chat.send(text);
+    'GET /api/state': () => { checkSession(); return { ...state(db, collector, setup), update, terminal: { running: terminal.running } }; },
+    // Claude Code in a terminal on the page. Its output arrives on /api/term/stream.
+    'POST /api/term/start': async (body) => { await terminal.start(...size(body)); },
+    'POST /api/term/input': (body) => {
+      if (typeof body.data !== 'string' || body.data.length > 100_000) throw new HttpError(400, 'Bad input.');
+      terminal.write(body.data);
     },
-    'POST /api/chat/stop': () => chat.stop(),
-    'POST /api/chat/new': () => chat.reset(),
+    'POST /api/term/resize': (body) => terminal.resize(...size(body)),
+    'POST /api/term/stop': () => terminal.stop(),
+    // The same as `instagram-scraper update`; the new version runs from the next start.
+    'POST /api/update': async () => {
+      if (process.platform === 'win32') throw new HttpError(400, 'On Windows, run Install.bat again to update.');
+      if (collector.running) throw new HttpError(409, `${collector.task?.label ?? 'A task'} is still running. Wait for it, or press Stop.`);
+      collector.log.info('Updating…');
+      const output = await new Promise<string>((resolve, reject) => {
+        const proc = spawn('bash', [join(appDir, 'bin', 'run.sh'), 'update'], { cwd: appDir });
+        let text = '';
+        proc.stdout.on('data', (chunk) => { text += chunk; });
+        proc.stderr.on('data', (chunk) => { text += chunk; });
+        proc.on('error', reject);
+        proc.on('close', (code) => (code === 0 ? resolve(text) : reject(new Error(`The update did not finish: ${text.trim().split('\n').at(-1) ?? code}`))));
+      });
+      for (const line of output.trim().split('\n').slice(-20)) collector.log.info(line);
+      update = false;
+    },
     'GET /api/posts': (_, url) => posts(db, url.searchParams.get('account'), Math.max(0, Number(url.searchParams.get('offset')) || 0),
       Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 30)),
       { type: url.searchParams.get('type'), q: url.searchParams.get('q'), sort: url.searchParams.get('sort') }),
@@ -489,7 +538,7 @@ export async function startDashboard(options: {
       if (max !== null && !(Number.isSafeInteger(max) && (max as number) > 0)) throw new HttpError(400, 'Enter a whole number of posts, or choose All.');
       const targets = body.accounts === 'all' ? 'all' : Array.isArray(body.accounts) ? body.accounts.filter((a): a is string => typeof a === 'string') : [];
       if (targets !== 'all' && !targets.length) throw new HttpError(400, 'Paste a username, or tick an account.');
-      collector.collect(targets, max as number | null);
+      collector.collect(targets, max as number | null, body.ignoreLimits === true);
     },
     // For good: files and collected data go, and later collects skip these posts.
     'POST /api/delete-posts': (body) => {
@@ -540,8 +589,24 @@ export async function startDashboard(options: {
         }
         return void res.writeHead(200, {
           ...common, 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
-          'content-security-policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+          'content-security-policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline' 'self'; script-src 'unsafe-inline' 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
         }).end(page);
+      }
+      // The terminal's library: public code from node_modules, the same for everyone, so no key is needed.
+      const vendor = VENDOR[url.pathname];
+      if (req.method === 'GET' && vendor) {
+        return void res.writeHead(200, { ...common, 'content-type': vendor.type, 'cache-control': 'private, max-age=86400' }).end(readFileSync(vendor.file));
+      }
+      // The terminal's output as Server-Sent Events: what the screen shows so far, then everything new.
+      if (req.method === 'GET' && url.pathname === '/api/term/stream') {
+        if (!valid(url.searchParams.get('t'))) return void res.writeHead(403).end();
+        res.writeHead(200, { ...common, 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+        const send = (event: string, data: unknown): void => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+        send('reset', terminal.output);
+        if (!terminal.running && terminal.exitCode !== null) send('exit', terminal.exitCode);
+        const unsubscribe = terminal.subscribe((event) => send(event.type, event.type === 'data' ? event.data : event.code));
+        req.on('close', unsubscribe);
+        return;
       }
       if (req.method === 'GET' && url.pathname === '/media') {
         if (!valid(url.searchParams.get('t'))) return void res.writeHead(403).end();
@@ -555,7 +620,7 @@ export async function startDashboard(options: {
     })().catch((error: unknown) => {
       const { status, message } = friendly(error);
       if (status >= 500 || !(error instanceof HttpError)) collector.log.debug(`${req.method} ${req.url?.split('?')[0]}: ${message}`);
-      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: message }));
+      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: message, ...(error instanceof HttpError ? error.extra : {}) }));
       else res.destroy();
     });
   });
@@ -578,7 +643,7 @@ export async function startDashboard(options: {
     collector,
     /** Stops any task, waits for its browser to close, then stops serving. */
     async close(): Promise<void> {
-      chat.stop();
+      terminal.stop();
       collector.stop();
       await collector.settle();
       server.closeAllConnections();

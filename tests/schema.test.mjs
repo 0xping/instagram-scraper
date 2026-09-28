@@ -10,7 +10,7 @@ test('schema migrates and preserves one sample collection across retries', () =>
   const dir = mkdtempSync(join(tmpdir(), 'instagram-schema-'));
   const db = openDatabase(join(dir, 'collector.sqlite'));
   try {
-    assert.equal(migrate(db), 16);
+    assert.equal(migrate(db), 17);
     assert.equal(migrate(db), 0);
     db.prepare("INSERT INTO competitors (username, display_name) VALUES ('brand', 'Brand')").run();
     assert.throws(() => db.prepare("INSERT INTO competitors (username) VALUES ('BRAND')").run(), /UNIQUE/);
@@ -62,7 +62,7 @@ test('existing post and media records survive the upgrade', () => {
     db.prepare('INSERT INTO competitor_posts (competitor_id, post_id) VALUES (1, 1)').run();
     db.prepare("INSERT INTO raw_post_snapshots (post_id, raw_json) VALUES (1, '{\"legacy\":true}')").run();
     db.prepare("INSERT INTO media_assets (post_id, ordinal, source_url, status) VALUES (1, 0, 'https://example.test/video.mp4', 'complete')").run();
-    assert.equal(migrate(db), 15);
+    assert.equal(migrate(db), 16);
     const post = db.prepare('SELECT competitor_id, type, extraction_status, first_scraped_at, created_at FROM posts WHERE id = 1').get();
     assert.equal(post.competitor_id, 1);
     assert.equal(post.type, 'reel');

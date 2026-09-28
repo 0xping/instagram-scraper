@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { saveSettings } from './env-file.js';
 import { dataPaths, ensureDataDirs } from './paths.js';
@@ -22,6 +23,7 @@ import { competitorStatus, formatRetry, formatStatus, RETRY_STAGES, type RetrySt
 import { formatTable } from './competitors.js';
 import { type ExportFormat } from './export.js';
 import { createTranscriptionProvider } from './transcription-provider.js';
+import { updateAvailable } from './update-check.js';
 import { formatTranscriptRun, processCompetitorTranscripts } from './transcripts.js';
 import { deletePosts, exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors, type CollectorHandle } from './runner.js';
 
@@ -61,6 +63,8 @@ Commands:
                     transcripts (if configured), comments. Resumes an unfinished run.
                     --all (npm run scrape:all): every competitor in turn; skips ones completed in the
                     last --recent-hours (default 24; 0 = none), continues past failures.
+                    Stops at DAILY_PAGE_LIMIT Instagram pages a day (default 300), and refuses to start for
+                    24h after Instagram pushed back. --ignore-limits overrides both: only when the user says so.
   retry-failed [<username...>] [--stage S[,S]] [--include-permanent] [--dry-run]
                     Retry failed posts (stages: metadata, media, reels, frames, transcripts, comments).
                     Retryable failures under the attempt cap only, unless --include-permanent.
@@ -75,6 +79,16 @@ Commands:
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  // On stderr, after the command: scripts and agents reading stdout never see it.
+  const update = updateAvailable(fileURLToPath(new URL('..', import.meta.url)));
+  try {
+    await run(args);
+  } finally {
+    if (await update) process.stderr.write('A newer version is available. Run: instagram-scraper update\n');
+  }
+}
+
+async function run(args: string[]): Promise<void> {
   if (!args.length || ['help', '--help'].includes(args[0]!)) return runCommand(args);
   process.umask(0o077); // raw pages and browser state may contain session tokens
   const config = loadConfig();
@@ -221,7 +235,7 @@ type BrowserRun = Pick<CollectorHandle, 'db' | 'context' | 'session' | 'competit
  * Shared setup for commands that browse competitor profiles: resolves `<username...>` or `--all`, opens the saved
  * session, turns Ctrl-C into a graceful stop, and always closes the browser and database.
  */
-async function withCompetitorBrowser(command: string, targets: string[], run: (ctx: BrowserRun) => Promise<boolean>): Promise<void> {
+async function withCompetitorBrowser(command: string, targets: string[], run: (ctx: BrowserRun) => Promise<boolean>, ignoreLimits = false): Promise<void> {
   if (targets.length === 0) throw new Error(`Usage: npm run ${command} -- <username...>  or  npm run ${command} -- --all`);
   const config = loadConfig();
   const log = createLogger(config.logLevel);
@@ -240,7 +254,7 @@ async function withCompetitorBrowser(command: string, targets: string[], run: (c
   process.on('SIGTERM', onSignal);
   let collector: CollectorHandle | undefined;
   try {
-    collector = await openCollector({ config, log, signal: abort.signal, targets, browser });
+    collector = await openCollector({ config, log, signal: abort.signal, targets, browser, ignoreLimits });
     const ok = await run(collector);
     if (abort.signal.aborted) process.exitCode = 130;
     else if (!ok) process.exitCode = 1;
@@ -436,6 +450,7 @@ function scrapeCommand(input: string[]): Promise<void> {
     commentLimit: DEFAULT_COMMENT_LIMIT as number | null,
   };
   flag('--resume'); // always on: an unfinished run is continued unless --force
+  const ignoreLimits = flag('--ignore-limits');
   takePostLimit(args);
   if (flag('--debug')) process.env.LOG_LEVEL = 'debug';
   const limitArg = takeFlag(args, '--comment-limit', true);
@@ -445,7 +460,7 @@ function scrapeCommand(input: string[]): Promise<void> {
   const recentHours = recentArg === undefined ? 24 : Number(recentArg);
   if (!Number.isFinite(recentHours) || recentHours < 0) throw new Error('--recent-hours needs a number of hours (0 = rerun every competitor)');
   const unknown = args.find((arg) => arg.startsWith('--') && arg !== '--all');
-  if (unknown) throw new Error(`Unknown option ${unknown}. Use --skip-media, --skip-frames, --skip-transcripts, --skip-comments, --comment-limit N|all, --post-limit N|all, --recent-hours N, --force, --resume, --debug, or --all.`);
+  if (unknown) throw new Error(`Unknown option ${unknown}. Use --skip-media, --skip-frames, --skip-transcripts, --skip-comments, --comment-limit N|all, --post-limit N|all, --recent-hours N, --force, --resume, --ignore-limits, --debug, or --all.`);
   const batch = args.includes('--all');
   return withCompetitorBrowser('scrape', args, async ({ db, context, session, competitors, config, log, signal }) => {
     const results = await scrapeCompetitors({ db, context, session, config, log, signal }, competitors, flags, {
@@ -460,7 +475,7 @@ function scrapeCommand(input: string[]): Promise<void> {
     if (batch && results.length) process.stdout.write(`${formatTable([['Competitor', 'Result', 'Job'], ...results.map((r) =>
       [r.username, r.status, r.jobId === null ? '' : String(r.jobId)])])}\n\n`);
     return results.every((r) => r.status === 'complete' || r.status.startsWith('skipped'));
-  });
+  }, ignoreLimits);
 }
 
 function exportCommand(input: string[]): Promise<void> {

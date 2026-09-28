@@ -31,7 +31,7 @@ Only one task runs at a time; starting another returns 409. Collecting needs `se
 
 ### CLI
 
-Run `instagram-scraper cli <command>` on an installed copy, or `npm run dev -- <command>` in a checkout. `help` lists every command. Errors go to stderr with a non-zero exit code.
+Run `instagram-scraper cli <command>` on an installed copy, `node dist/cli.js <command>` inside the app folder (this is what `instagram-scraper claude` sessions use), or `npm run dev -- <command>` in a checkout. `help` lists every command. Errors go to stderr with a non-zero exit code.
 
 - `status --json`: every account as a JSON array (`username`, `discovered`, `metadata`, `media`, `failed`, `postsCount`, `lastScrapedAt`, `jobStatus`).
 - `scrape <username...> [--post-limit N]`, or `scrape --all`: the full collection. It resumes unfinished runs and skips completed work.
@@ -46,6 +46,7 @@ After every collection, each account has an up-to-date folder at `<data dir>/com
 ### Boundaries
 
 - Deleting a post removes its files and collected rows, and later collects skip it. Confirm with the user before deleting.
+- Collecting stops at the daily limit of Instagram pages (`DAILY_PAGE_LIMIT`, 300 by default), and won't start for 24 hours after Instagram pushed back. Both protect the user's Instagram account: tell the user, and never add `--ignore-limits` unless they explicitly ask for it.
 - Never try to get past an Instagram login, CAPTCHA or security challenge. Stop and tell the user.
 - Collect only what the logged-in browser session can see.
 
@@ -54,7 +55,9 @@ After every collection, each account has an up-to-date folder at `<data dir>/com
 ### Layout
 
 - `src/cli.ts`: the CLI commands.
-- `src/app/chat.ts`: the dashboard's **Ask Claude** panel. It runs the user's own `claude -p`, limited to Read, Grep, Glob and `Bash(node dist/cli.js *)`, and resumes the same session for each message.
+- `src/app/terminal.ts`: the dashboard's **Claude** panel. The user's own interactive Claude Code runs on a pseudo-terminal (node-pty, an optional dependency) in the app folder, and the page shows it with xterm.js (served from `/vendor/`). Output streams over Server-Sent Events, and keystrokes are POSTed.
+- `src/instagram-limits.ts`: the daily page limit and the pause after Instagram pushes back, enforced in `openCollector`, which every collection goes through.
+- `src/update-check.ts`: the new-version notice in the CLI and the dashboard.
 - `src/app/server.ts`, `src/app/page.html` and `src/app/main.ts`: the dashboard. It's one HTML page with inline script, served with the JSON API above; `main.ts` launches it.
 - `src/runner.ts`: shared operations for both front ends (open a collector, collect, retry, export, delete posts).
 - `src/pipeline.ts`: the collection stages. Each stage lives in its own module: `discovery.ts`, `post-scraper.ts`, `media.ts`, `reels.ts`, `frames.ts`, `transcripts.ts` and `comments.ts`.

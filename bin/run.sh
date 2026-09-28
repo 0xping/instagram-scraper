@@ -35,6 +35,19 @@ case "${1:-}" in
   whisper) shift; exec bash "$APP/whisper.sh" "$@" ;;
   uninstall) exec bash "$APP/uninstall.sh" ;;
   cli) shift; cd "$APP"; exec node dist/cli.js "$@" ;;
+  claude)
+    # A normal Claude Code session in the app folder (CLAUDE.md points it at AGENTS.md), also reachable from
+    # claude.ai/code and the Claude app through Remote Control.
+    shift; cd "$APP"
+    CLAUDE="$(command -v claude || true)"; [ -n "$CLAUDE" ] || CLAUDE="$HOME/.local/bin/claude"
+    [ -x "$CLAUDE" ] || { echo "Claude Code is not installed. Get it at https://claude.com/claude-code, log in, then run this again." >&2; exit 1; }
+    # The dashboard opens beside it for browsing what Claude collects (an open one is reused), and closes with it.
+    node dist/app/main.js > dashboard.log 2>&1 &
+    dashboard=$!
+    status=0
+    "$CLAUDE" --remote-control "Instagram research" "$@" || status=$?
+    kill -TERM "$dashboard" 2>/dev/null && wait "$dashboard" 2>/dev/null
+    exit "$status" ;;
   help|--help|-h)
     cat <<USAGE
 instagram-scraper              open the dashboard
@@ -43,6 +56,7 @@ instagram-scraper whisper ...  install | start | stop | status  (local transcrip
 instagram-scraper update       get the latest version
 instagram-scraper uninstall    remove the program (your data is kept unless you confirm)
 instagram-scraper cli ...      the command-line interface
+instagram-scraper claude       the dashboard plus Claude Code, also open at claude.ai/code
 USAGE
     ;;
   *) cd "$APP"; exec node dist/app/main.js "$@" ;;

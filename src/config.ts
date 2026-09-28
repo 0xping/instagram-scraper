@@ -7,6 +7,8 @@ export interface AppConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   frameInterval: number;
   commentLimit: number | null;
+  /** Instagram pages a day across every collection; null means no limit. */
+  dailyPageLimit: number | null;
   browser: {
     headed: boolean;
     /** A headed window on screen; false parks it off screen, keeping headed data without the window in the way. */
@@ -69,6 +71,8 @@ export function loadConfig(projectDir = process.cwd()): AppConfig {
     },
     frameInterval: envPositiveNumber('FRAME_INTERVAL', 1),
     commentLimit: process.env.COMMENT_LIMIT?.trim() === 'all' ? null : envPositiveInt('COMMENT_LIMIT', 100),
+    // Modest daily activity is the best protection for the account doing the collecting.
+    dailyPageLimit: process.env.DAILY_PAGE_LIMIT?.trim() === 'all' ? null : envPositiveInt('DAILY_PAGE_LIMIT', 300),
     dataDir: resolve(projectDir, dataDir),
     logLevel: logLevel as AppConfig['logLevel'],
   };

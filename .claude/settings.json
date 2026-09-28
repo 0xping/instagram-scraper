@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node dist/cli.js *)",
+      "Bash(instagram-scraper cli *)"
+    ],
+    "ask": [
+      "Bash(node dist/cli.js delete-post *)",
+      "Bash(instagram-scraper cli delete-post *)",
+      "Bash(node dist/cli.js * --ignore-limits*)",
+      "Bash(instagram-scraper cli * --ignore-limits*)"
+    ]
+  }
+}

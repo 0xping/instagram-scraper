@@ -60,6 +60,10 @@ download_app() {
     mkdir -p "$APP"
     curl -fsSL "${REPO%.git}/archive/refs/heads/$BRANCH.tar.gz" | tar xz --strip-components=1 -C "$APP" \
       || die "Download failed. Check your connection and run this again."
+    # Which commit this is, so the app can say when a newer one is out. Not fatal: it only turns that notice off.
+    slug="${REPO#https://github.com/}"; slug="${slug%.git}"
+    curl -fsSL -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$slug/commits/$BRANCH" > "$APP/.version" 2>/dev/null \
+      || rm -f "$APP/.version"
   fi
 }
 

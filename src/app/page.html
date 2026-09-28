@@ -49,6 +49,8 @@ main { width: min(880px, 100% - 32px); margin: 0 auto; padding: 32px 0 64px; dis
 .connect div { flex: 1; }
 .connect p { margin: 6px 0 0; color: var(--muted); }
 .banner { padding: 12px 16px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); font-weight: 500; }
+.banner.update { display: flex; align-items: center; gap: 12px; background: var(--busy-bg); color: var(--busy); padding: 8px 8px 8px 16px; }
+.banner.update span { flex: 1; }
 
 .activity { background: var(--ink); color: var(--on-ink); border-radius: 14px; padding: 20px 24px; display: grid; gap: 12px; }
 .activity.done { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
@@ -192,19 +194,16 @@ dialog.post { width: min(1040px, 100vw - 32px); }
   .post-body { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; max-height: calc(100vh - 48px); overflow: auto; }
   .media { height: 60vh; } .info { overflow: visible; }
 }
-.chat { position: fixed; top: 76px; right: 16px; bottom: 16px; z-index: 10; width: min(400px, 100vw - 32px); display: flex; flex-direction: column;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 16px 48px rgb(0 0 0 / .18); }
-.chat-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--line); }
-.chat-head div { flex: 1; display: grid; }
-.chat-head small { font-size: 12px; color: var(--muted); }
-.chat-log { flex: 1; overflow: auto; padding: 16px 18px; display: grid; gap: 10px; align-content: start; font-size: 14px; }
-.msg { margin: 0; white-space: pre-wrap; word-break: break-word; }
-.msg.user { justify-self: end; max-width: 85%; padding: 8px 12px; border-radius: 12px 12px 4px 12px; background: var(--ink); color: var(--on-ink); }
-.msg.tool { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); padding-left: 10px; border-left: 2px solid var(--line-strong); }
-.msg.error { color: var(--bad); }
-.chat-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); align-items: end; }
-.chat-form textarea { flex: 1; font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); resize: none; min-height: 44px; max-height: 140px; }
-@media (max-width: 720px) { .chat { top: 72px; right: 8px; left: 8px; bottom: 8px; width: auto; } #chat-open { width: 44px; padding: 0; } #chat-open span { display: none; } }
+.term { position: fixed; top: 76px; right: 16px; bottom: 16px; z-index: 10; width: min(760px, 50vw); display: flex; flex-direction: column;
+  background: #121210; color: #f2f0ea; border-radius: 16px; overflow: hidden; box-shadow: 0 16px 48px rgb(0 0 0 / .25); }
+.term-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border-bottom: 1px solid #2c2a26; }
+.term-head div { flex: 1; min-width: 0; display: grid; }
+.term-head small { font-size: 12px; color: #a8a49b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-head button { height: 36px; background: #26241f; color: #f2f0ea; border-color: #3a3833; }
+.term-head .square { width: 36px; }
+#xterm { flex: 1; min-height: 0; padding: 8px 0 0 10px; }
+@media (min-width: 1200px) { body.with-term main { margin: 0 calc(min(760px, 50vw) + 32px) 0 32px; width: auto; } }
+@media (max-width: 720px) { .term { top: 72px; left: 8px; right: 8px; bottom: 8px; width: auto; } #term-open span { display: none; } #term-open { width: 44px; padding: 0; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -227,7 +226,7 @@ dialog.post { width: min(1040px, 100vw - 32px); }
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></symbol>
-  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
 </svg>
 
@@ -235,21 +234,18 @@ dialog.post { width: min(1040px, 100vw - 32px); }
   <span class="logo" aria-hidden="true"><svg class="i"><use href="#i-cam"/></svg></span>
   <a class="title" href="#/"><span>Instagram research</span></a>
   <span id="status" class="pill dot status" role="status">Loading…</span>
-  <button id="chat-open" aria-expanded="false" aria-controls="chat"><svg class="i"><use href="#i-chat"/></svg><span>Ask Claude</span></button>
+  <button id="term-open" aria-expanded="false" aria-controls="term"><svg class="i"><use href="#i-term"/></svg><span>Claude</span></button>
   <button class="square" popovertarget="menu-main" aria-label="More"><svg class="i"><use href="#i-dots"/></svg></button>
 </header>
-<aside id="chat" class="chat" aria-label="Chat with Claude" hidden>
-  <div class="chat-head">
-    <div><b>Claude</b><small>Claude Code on this computer: it can collect and read your data</small></div>
-    <button id="chat-new" class="link">New chat</button>
-    <button id="chat-close" class="square" aria-label="Close chat"><svg class="i"><use href="#i-x"/></svg></button>
+
+<aside id="term" class="term" aria-label="Claude Code" hidden>
+  <div class="term-head">
+    <div><b>Claude Code</b><small>Runs on this computer, in the app folder · also open at claude.ai/code</small></div>
+    <button id="term-start" hidden>Start</button>
+    <button id="term-stop" hidden>Stop</button>
+    <button id="term-close" class="square" aria-label="Close Claude Code"><svg class="i"><use href="#i-x"/></svg></button>
   </div>
-  <div id="chat-log" class="chat-log" aria-live="polite"></div>
-  <form id="chat-form" class="chat-form">
-    <textarea id="chat-input" rows="1" placeholder="Collect the newest 2 posts of @nike" aria-label="Message to Claude"></textarea>
-    <button id="chat-send" class="primary">Send</button>
-    <button id="chat-stop" type="button" hidden>Stop</button>
-  </form>
+  <div id="xterm"></div>
 </aside>
 <div id="menu-main" class="menu" popover>
   <button data-act="reconnect"><svg class="i"><use href="#i-link"/></svg>Reconnect Instagram</button>
@@ -261,6 +257,8 @@ dialog.post { width: min(1040px, 100vw - 32px); }
 <main>
   <div id="offline" class="banner" hidden>The app has stopped. Start it again, then reload this page.</div>
   <div id="setup" class="banner" hidden></div>
+  <div id="pause" class="banner" role="status" hidden></div>
+  <div id="update" class="banner update" hidden><span>A new version is available.</span><button id="update-btn">Update now</button></div>
 
   <section id="connect" class="card connect" hidden>
     <div><h2 id="connect-title">Connect Instagram first</h2>
@@ -293,6 +291,7 @@ dialog.post { width: min(1040px, 100vw - 32px); }
       <input id="file" type="file" accept=".txt,.csv,text/plain,text/csv" multiple hidden>
     </form>
     <p class="hint">Or drop a .txt or .csv file anywhere on this page.</p>
+    <p id="quota" class="muted" style="margin:0;font-size:13px"></p>
     <div id="accounts"></div>
   </div>
 
@@ -380,6 +379,8 @@ dialog.post { width: min(1040px, 100vw - 32px); }
     <small class="muted" data-for="local">Needs the Whisper server running: <code>instagram-scraper whisper start</code></small>
     <label class="field">Comments per post<input name="comments" required pattern="[Aa][Ll][Ll]|[1-9][0-9]*" title="A number, or all"><small>A number, or <i>all</i>.</small></label>
     <label class="field">Video images per second<input name="fps" type="number" required min="0.01" step="0.01"></label>
+    <label class="field">Instagram pages per day<input name="dailyLimit" required pattern="[Aa][Ll][Ll]|[1-9][0-9]*" title="A number, or all">
+      <small>Collecting stops for the day here, and waits a day after Instagram pushes back. Lower is safer for the account.</small></label>
     <label class="check"><input type="checkbox" name="show">Show the browser while collecting</label>
     <div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div>
   </form>
@@ -423,7 +424,7 @@ async function api(path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Something went wrong (${response.status}).`);
+  if (!response.ok) throw Object.assign(new Error(data.error || `Something went wrong (${response.status}).`), { data });
   return data;
 }
 
@@ -510,9 +511,16 @@ function render() {
   $('#a-retry-btn').disabled = busy();
   $('#setup').hidden = !S.setup.length;
   $('#setup').textContent = S.setup.join(' ');
+  $('#update').hidden = !S.update;
+  $('#update-btn').disabled = busy();
+  const { pause, pagesToday, limit } = S.instagram;
+  $('#pause').hidden = !pause;
+  if (pause) $('#pause').textContent = `Instagram pushed back ${ago(pause.at)}, so collecting is paused until ${new Date(pause.until).toLocaleString()} to protect the account.`;
+  $('#quota').textContent = `Today: ${plural(pagesToday, 'Instagram page')} opened${limit == null ? '' : ` of ${whole.format(limit)}`}. Keeping this low protects the account.`;
   renderActivity();
   renderAccounts();
-  renderChat();
+  $('#term-start').hidden = S.terminal.running || !term;
+  $('#term-stop').hidden = !S.terminal.running;
   if (current) renderAccountHead();
 }
 
@@ -675,7 +683,17 @@ $('#how-many-form').onsubmit = async (event) => {
   const newest = event.target.limit.value === 'newest';
   const n = Number($('#hm-n').value);
   if (newest && !(Number.isInteger(n) && n > 0)) { toast('Enter a whole number of posts.', 'error'); return; }
-  if (await act(() => api('/api/collect', { accounts: pending, maxPosts: newest ? n : null }))) {
+  const start = (ignoreLimits) => api('/api/collect', { accounts: pending, maxPosts: newest ? n : null, ignoreLimits });
+  let started;
+  try {
+    started = await start(false);
+  } catch (error) {
+    // Paused after Instagram pushed back, or today's limit is used: only the user may choose to go on.
+    if (error.data?.canOverride && confirm(`${error.message}\n\nCollect anyway? This risks the Instagram account.`)) started = await act(() => start(true));
+    else if (!error.data?.canOverride) toast(error.message, 'error');
+  }
+  poll();
+  if (started) {
     $('#how-many').close();
     dismissed = null;
     scrollTo({ top: 0, behavior: 'smooth' });
@@ -708,6 +726,7 @@ async function openSettings() {
   form.comments.value = s.comments;
   form.fps.value = s.fps;
   form.show.checked = s.show;
+  form.dailyLimit.value = s.dailyLimit;
   form.dataset.keys = JSON.stringify(s.keys);
   showService();
   $('#settings').showModal();
@@ -726,7 +745,7 @@ $('#settings-form').onsubmit = async (event) => {
   event.preventDefault();
   const f = event.target;
   if (await act(() => api('/api/settings', { service: f.service.value, key: f.key.value, server: f.server.value, model: f.model.value,
-    comments: f.comments.value, fps: Number(f.fps.value), show: f.show.checked }), 'Settings saved.')) $('#settings').close();
+    comments: f.comments.value, fps: Number(f.fps.value), show: f.show.checked, dailyLimit: f.dailyLimit.value }), 'Settings saved.')) $('#settings').close();
 };
 $('#hide-form').onsubmit = async (event) => {
   event.preventDefault();
@@ -868,43 +887,86 @@ $('#delete-form').onsubmit = async (event) => {
 };
 $('#post').addEventListener('close', () => { $('#p-media').innerHTML = ''; });
 
-// ---- Chat with Claude -------------------------------------------------------------------------------
+// ---- Claude Code in a terminal ---------------------------------------------------------------------
 
-let chatKey = '';
-function renderChat() {
-  const { messages, running } = S.chat;
-  $('#chat-send').hidden = running;
-  $('#chat-stop').hidden = !running;
-  $('#chat-new').disabled = running || !messages.length;
-  const key = JSON.stringify([messages.length, messages.at(-1), running]);
-  if (key === chatKey) return;
-  chatKey = key;
-  const log = $('#chat-log');
-  log.innerHTML = (messages.length ? messages.map((m) => `<p class="msg ${m.role}" dir="auto">${m.role === 'tool' ? '▸ ' : ''}${esc(m.text)}</p>`).join('')
-    : '<p class="msg muted">Ask Claude to collect accounts, a number of posts, or to find something in what you collected. New posts show up on this page as they’re saved.</p>')
-    + (running ? '<p class="msg muted">Working…</p>' : '');
-  log.scrollTop = log.scrollHeight;
+let term = null;
+let fit = null;
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = resolve;
+    el.onerror = () => reject(new Error('Could not load the terminal. Reload the page.'));
+    document.head.append(el);
+  });
 }
-function showChat(open) {
-  $('#chat').hidden = !open;
-  $('#chat-open').setAttribute('aria-expanded', String(open));
-  if (open) $('#chat-input').focus();
+// Keystrokes go in order, several per request while one is on its way.
+let typed = '';
+let sending = false;
+async function sendKeys(data) {
+  typed += data;
+  if (sending) return;
+  sending = true;
+  while (typed) {
+    const chunk = typed;
+    typed = '';
+    await api('/api/term/input', { data: chunk }).catch(() => {});
+  }
+  sending = false;
 }
-$('#chat-open').onclick = () => showChat($('#chat').hidden);
-$('#chat-close').onclick = () => showChat(false);
-$('#chat-form').onsubmit = async (event) => {
-  event.preventDefault();
-  const input = $('#chat-input');
-  const message = input.value.trim();
-  if (!message) { input.focus(); return; }
-  if (await act(() => api('/api/chat', { message }))) input.value = '';
+const syncSize = () => api('/api/term/resize', { cols: term.cols, rows: term.rows }).catch(() => {});
+
+async function setupTerminal() {
+  const css = document.createElement('link');
+  css.rel = 'stylesheet';
+  css.href = '/vendor/xterm.css';
+  document.head.append(css);
+  await loadScript('/vendor/xterm.js');
+  await loadScript('/vendor/addon-fit.js');
+  term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    theme: { background: '#121210', foreground: '#f2f0ea', cursor: '#f2f0ea', selectionBackground: '#3a3833' } });
+  fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open($('#xterm'));
+  term.onData(sendKeys);
+  new ResizeObserver(() => { if (!$('#term').hidden) { fit.fit(); if (S?.terminal.running) syncSize(); } }).observe($('#xterm'));
+  // What the screen showed so far, then everything new; it reconnects by itself if the app restarts.
+  const stream = new EventSource(`/api/term/stream?t=${encodeURIComponent(TOKEN)}`);
+  stream.addEventListener('reset', (event) => { term.reset(); term.write(JSON.parse(event.data)); });
+  stream.addEventListener('data', (event) => term.write(JSON.parse(event.data)));
+  stream.addEventListener('exit', () => { term.write('\r\n\x1b[2mClaude Code has ended. Press Start to open it again.\x1b[0m\r\n'); poll(); });
+}
+
+async function startTerminal() {
+  fit.fit();
+  await act(() => api('/api/term/start', { cols: term.cols, rows: term.rows }));
+  term.focus();
+}
+async function showTerminal(open) {
+  $('#term').hidden = !open;
+  document.body.classList.toggle('with-term', open);
+  $('#term-open').setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  try {
+    if (!term) await setupTerminal();
+  } catch (error) {
+    toast(error.message, 'error');
+    return;
+  }
+  if (S?.terminal.running) { fit.fit(); syncSize(); term.focus(); } else await startTerminal();
+}
+$('#term-open').onclick = () => showTerminal($('#term').hidden);
+$('#term-close').onclick = () => showTerminal(false);
+$('#term-start').onclick = startTerminal;
+$('#term-stop').onclick = () => act(() => api('/api/term/stop', {}));
+
+$('#update-btn').onclick = async (event) => {
+  event.target.disabled = true;
+  event.target.textContent = 'Updating…';
+  const done = await act(() => api('/api/update', {}), 'Updated. Close the app window and start it again to use the new version.');
+  event.target.textContent = 'Update now';
+  if (!done) event.target.disabled = false;
 };
-// Enter sends; Shift+Enter starts a new line.
-$('#chat-input').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#chat-form').requestSubmit(); }
-});
-$('#chat-stop').onclick = () => act(() => api('/api/chat/stop', {}));
-$('#chat-new').onclick = () => act(() => api('/api/chat/new', {}));
 
 route();
 poll();

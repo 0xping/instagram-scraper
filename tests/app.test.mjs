@@ -1,4 +1,4 @@
-/* global Buffer, URL, fetch, setTimeout */
+/* global AbortController, Buffer, URL, fetch, TextDecoder, setTimeout */
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { test } from 'node:test';
+
+// No network in tests: the update check stays off.
+process.env.INSTAGRAM_SCRAPER_NO_UPDATE_CHECK = '1';
 import { parseAccountList } from '../dist/app/model.js';
 import { startDashboard } from '../dist/app/server.js';
 import { competitorStatus } from '../dist/batch.js';
@@ -15,6 +18,7 @@ import { saveSettings } from '../dist/env-file.js';
 import { openDataPath, openInstagramUrl, resolveDataPath } from '../dist/open-path.js';
 import { resolveCompetitors } from '../dist/runner.js';
 import { saveDiscovered } from '../dist/discovery.js';
+import { findClaude } from '../dist/app/terminal.js';
 import { execFileSync } from 'node:child_process';
 
 test('pasted text and imported files give usernames, and archiving preserves data', () => {
@@ -105,9 +109,9 @@ test('opening a missing folder or invalid URL rejects instead of throwing', asyn
 });
 
 /** A dataset with one collected account (a photo post with a comment and a saved file) and one never collected. */
-async function dashboard(t) {
+async function dashboard(t, extra = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'app-server-'));
-  const envKeys = ['DATA_DIR', 'TRANSCRIPTION_PROVIDER', 'TRANSCRIPTION_BASE_URL', 'TRANSCRIPTION_MODEL', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_SHOW', 'BROWSER_HEADED', 'GROQ_API_KEY'];
+  const envKeys = ['DATA_DIR', 'TRANSCRIPTION_PROVIDER', 'TRANSCRIPTION_BASE_URL', 'TRANSCRIPTION_MODEL', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_SHOW', 'BROWSER_HEADED', 'DAILY_PAGE_LIMIT', 'GROQ_API_KEY'];
   const previous = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   process.env.DATA_DIR = dir;
   const db = openDatabase(join(dir, 'collector.sqlite'));
@@ -122,7 +126,7 @@ async function dashboard(t) {
   db.prepare(`INSERT INTO media (post_id, position, local_path, download_status) VALUES (?, 0, 'competitors/alpha/posts/AlphaPost1/media/001.jpg', 'complete')`).run(post);
   db.prepare("INSERT INTO comments (post_id, username, text, likes_count) VALUES (?, 'fan', 'Nice', 3)").run(post);
   const opened = [];
-  const app = await startDashboard({ db, dataDir: dir, envPath: join(dir, '.env'), open: async (_, path) => { opened.push(path); } });
+  const app = await startDashboard({ db, dataDir: dir, envPath: join(dir, '.env'), open: async (_, path) => { opened.push(path); }, ...extra });
   t.after(async () => {
     await app.close();
     db.close();
@@ -184,6 +188,8 @@ test('the dashboard lists accounts, their posts, and one post in full', async (t
   assert.deepEqual(state.accounts.map((a) => [a.username, a.saved, a.text]), [['alpha', 1, 'All collected'], ['beta', 0, 'Never collected']]);
   assert.equal(state.task, null, 'no task runs until asked: there is no saved login to check');
   assert.equal(state.session, 'missing');
+  assert.deepEqual(state.instagram, { pagesToday: 0, limit: 300, pause: null }, 'the page shows today\'s Instagram activity');
+  assert.equal(state.update, false);
 
   const { body: grid } = await call('/api/posts?account=alpha');
   assert.equal(grid.account.username, 'alpha');
@@ -231,17 +237,18 @@ test('the dashboard adds, hides, exports and opens folders it works out itself',
 
 test('settings save everything a transcription choice needs in one step', async (t) => {
   const { call, dir } = await dashboard(t);
-  const form = { service: 'local', comments: 'all', fps: 2, show: true };
+  const form = { service: 'local', comments: 'all', fps: 2, show: true, dailyLimit: '150' };
   const saved = await call('/api/settings', form);
   assert.equal(saved.status, 200);
   assert.deepEqual([saved.body.service, saved.body.comments, saved.body.fps, saved.body.show], ['local', 'all', 2, true]);
   const env = readFileSync(join(dir, '.env'), 'utf8');
   for (const line of ['TRANSCRIPTION_PROVIDER="custom"', 'TRANSCRIPTION_BASE_URL="http://127.0.0.1:8080/v1"', 'TRANSCRIPTION_MODEL="large-v3-turbo"',
-    'COMMENT_LIMIT="all"', 'FRAME_INTERVAL="0.5"', 'BROWSER_SHOW="true"', 'BROWSER_HEADED="true"']) assert.ok(env.includes(line), line);
+    'COMMENT_LIMIT="all"', 'FRAME_INTERVAL="0.5"', 'BROWSER_SHOW="true"', 'BROWSER_HEADED="true"', 'DAILY_PAGE_LIMIT="150"']) assert.ok(env.includes(line), line);
   delete process.env.GROQ_API_KEY;
   assert.match((await call('/api/settings', { ...form, service: 'groq' })).body.error, /Groq API key/);
   assert.match((await call('/api/settings', { ...form, comments: 'lots' })).body.error, /whole number/);
   assert.match((await call('/api/settings', { ...form, fps: 0 })).body.error, /more than 0/);
+  assert.match((await call('/api/settings', { ...form, dailyLimit: 'lots' })).body.error, /pages per day/);
   assert.equal(readFileSync(join(dir, '.env'), 'utf8'), env, 'a refused form changes nothing');
 });
 
@@ -299,56 +306,44 @@ test('the CLI deletes posts by shortcode or link and prints status as JSON', (t)
   assert.deepEqual(JSON.parse(cli('status', '--json')).map((r) => [r.username, r.discovered]), [['alpha', 0]]);
 });
 
-test('the chat runs the Claude Code already installed, limited to the collector, and resumes the conversation', async (t) => {
-  const { call, dir } = await dashboard(t);
-  const bin = join(dir, 'fake-claude');
-  const seen = join(dir, 'seen.jsonl');
-  // Stands in for `claude -p`: records what it was given and answers in stream-json.
-  writeFileSync(bin, `#!/usr/bin/env node
-let input = '';
-process.stdin.on('data', (c) => { input += c; }).on('end', () => {
-  process.getBuiltinModule('fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ args: process.argv.slice(2), input, cwd: process.cwd() }) + '\\n');
-  const out = (e) => process.stdout.write(JSON.stringify(e) + '\\n');
-  out({ type: 'system', subtype: 'init', session_id: 'sess-1' });
-  out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'node dist/cli.js scrape nike --post-limit 2' } }] } });
-  out({ type: 'assistant', message: { content: [{ type: 'text', text: 'Collected 2 posts.' }] } });
-  out({ type: 'result', is_error: false, result: 'Collected 2 posts.', session_id: 'sess-1' });
-});
-`, { mode: 0o755 });
-  const previous = process.env.CLAUDE_BIN;
-  process.env.CLAUDE_BIN = bin;
-  t.after(() => { if (previous === undefined) delete process.env.CLAUDE_BIN; else process.env.CLAUDE_BIN = previous; });
-  const settled = async () => {
-    for (let i = 0; i < 100; i += 1) {
-      const { chat } = (await call('/api/state')).body;
-      if (!chat.running) return chat;
-      await new Promise((resolve) => setTimeout(resolve, 50));
+test('Claude Code runs in a real terminal on the page: output streams live, keys go in, Stop ends it', async (t) => {
+  // Stands in for Claude Code: answers each line it is sent.
+  const echo = "process.stdout.write('ready\\n'); process.stdin.on('data', (d) => process.stdout.write('got:' + d));";
+  const { app, origin, call } = await dashboard(t, { terminalCommand: () => ({ file: process.execPath, args: ['-e', echo] }) });
+  const page = await fetch(app.url);
+  assert.match(page.headers.get('content-security-policy'), /script-src 'unsafe-inline' 'self'/, 'the page may load the terminal library');
+  const lib = await fetch(`${origin}/vendor/xterm.js`);
+  assert.deepEqual([lib.status, lib.headers.get('content-type')], [200, 'text/javascript; charset=utf-8']);
+  assert.equal((await fetch(`${origin}/api/term/stream`)).status, 403, 'the stream needs the launch key');
+  assert.equal((await call('/api/term/start', { cols: 0, rows: 24 })).status, 400);
+
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const stream = await fetch(`${origin}/api/term/stream?t=${app.token}`, { signal: controller.signal });
+  const reader = stream.body.getReader();
+  let text = '';
+  const until = async (pattern) => {
+    const decoder = new TextDecoder();
+    while (!pattern.test(text)) {
+      const { value, done } = await Promise.race([reader.read(), new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out waiting for ${pattern}: ${text}`)), 10_000))]);
+      if (done) throw new Error('stream ended');
+      text += decoder.decode(value);
     }
-    throw new Error('the chat never finished');
   };
+  await until(/event: reset/);
+  assert.equal((await call('/api/term/start', { cols: 100, rows: 30 })).status, 200);
+  assert.equal((await call('/api/state')).body.terminal.running, true);
+  await until(/ready/);
+  await call('/api/term/input', { data: 'hello\r' });
+  await until(/got:hello/);
+  assert.equal((await call('/api/term/resize', { cols: 120, rows: 40 })).status, 200);
+  await call('/api/term/stop', {});
+  await until(/event: exit/);
+  assert.equal((await call('/api/state')).body.terminal.running, false);
+});
 
-  assert.match((await call('/api/chat', { message: '  ' })).body.error, /Write a message/);
-  assert.equal((await call('/api/chat', { message: 'Collect 2 posts of @nike' })).status, 200);
-  const chat = await settled();
-  assert.deepEqual(chat.messages, [
-    { role: 'user', text: 'Collect 2 posts of @nike' },
-    { role: 'tool', text: 'node dist/cli.js scrape nike --post-limit 2' },
-    { role: 'assistant', text: 'Collected 2 posts.' },
-  ]);
-  await call('/api/chat', { message: 'And one more' });
-  await settled();
-  const [first, second] = readFileSync(seen, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
-  assert.equal(first.input, 'Collect 2 posts of @nike', 'the message goes on stdin');
-  assert.ok(first.args.includes('-p') && first.args.includes('dontAsk'));
-  assert.equal(first.args[first.args.indexOf('--allowedTools') + 1], 'Bash(node dist/cli.js *)', 'the only command it may run is the collector');
-  assert.equal(first.args[first.args.indexOf('--tools') + 1], 'Bash,Read,Grep,Glob');
-  assert.ok(existsSync(join(first.cwd, 'AGENTS.md')), 'it runs in the app folder, next to AGENTS.md');
-  assert.equal(first.args.includes('--resume'), false);
-  assert.equal(second.args[second.args.indexOf('--resume') + 1], 'sess-1', 'a follow-up continues the conversation');
-
-  await call('/api/chat/new', {});
-  assert.deepEqual((await call('/api/state')).body.chat.messages, []);
-  process.env.CLAUDE_BIN = join(dir, 'no-such-claude');
-  await call('/api/chat', { message: 'hi' });
-  assert.match((await settled()).messages.at(-1).text, /Claude Code was not found/);
+test('Claude Code is found where its installer puts it, or where CLAUDE_BIN says', () => {
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = '/opt/claude/bin/claude';
+  try { assert.equal(findClaude(), '/opt/claude/bin/claude'); } finally { if (previous === undefined) delete process.env.CLAUDE_BIN; else process.env.CLAUDE_BIN = previous; }
 });

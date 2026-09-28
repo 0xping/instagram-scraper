@@ -9,6 +9,7 @@ import { migrate, openDatabase, throwIfStorageError } from './db.js';
 import { exportCompetitor, type ExportFormat } from './export.js';
 import { postDir } from './media-files.js';
 import { InstagramSessionManager } from './instagram-session.js';
+import { assertMayCollect, watchInstagram } from './instagram-limits.js';
 import type { Logger } from './logger.js';
 import { collectorStages, recentlyCompleted, runPipeline, type CollectorFlags, type PipelineRun } from './pipeline.js';
 import { dataPaths } from './paths.js';
@@ -83,9 +84,13 @@ export interface CollectorHandle {
   close(): Promise<void>;
 }
 
-/** The shared browser collector. The caller owns the dataset lock and abort controller. */
+/**
+ * The shared browser collector. The caller owns the dataset lock and abort controller. It refuses to start during a
+ * pause after Instagram pushed back, or once the day's page limit is used, unless `ignoreLimits`; and it stops the
+ * run, as Stop would, when the limit is reached midway.
+ */
 export async function openCollector(options: {
-  log: Logger; signal: AbortSignal; config?: AppConfig; targets?: string[]; browser?: BrowserManager;
+  log: Logger; signal: AbortSignal; config?: AppConfig; targets?: string[]; browser?: BrowserManager; ignoreLimits?: boolean;
 }): Promise<CollectorHandle> {
   const config = options.config ?? loadConfig();
   const path = dataPaths(config.dataDir);
@@ -95,10 +100,16 @@ export async function openCollector(options: {
   try {
     migrate(db);
     const competitors = resolveCompetitors(db, options.targets ?? ['--all']);
+    const limit = options.ignoreLimits ? null : config.dailyPageLimit;
+    if (!options.ignoreLimits) assertMayCollect(db, limit);
+    const stop = new AbortController();
+    if (options.signal.aborted) stop.abort();
+    options.signal.addEventListener('abort', () => stop.abort(), { once: true });
     const session = new InstagramSessionManager(browser, path.instagramState, config.browser.loginTimeoutMs, options.log);
     const context = await session.open();
+    watchInstagram(db, context, limit, (reason) => { options.log.warn(reason); stop.abort(); });
     return {
-      db, browser, context, session, competitors, config, log: options.log, signal: options.signal,
+      db, browser, context, session, competitors, config, log: options.log, signal: stop.signal,
       async close() {
         await session.saveState(context).catch(() => undefined);
         await browser.close();
