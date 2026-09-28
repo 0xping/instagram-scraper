@@ -45,7 +45,7 @@ The collector architecture and existing numbered migrations were left intact. Th
 ```mermaid
 flowchart TD
   CLI[CLI: configuration and dataset lock] --> Runner[Shared collector runner]
-  Dashboard[Ink dashboard: dataset lock, status, input] --> Runner
+  Dashboard[Browser dashboard on 127.0.0.1: dataset lock, status, actions] --> Runner
   Runner --> Pipeline[Sequential pipeline and targeted retries]
   Pipeline --> Browser[Playwright Chromium and saved session]
   Browser --> Extract[Profile, discovery, post and comment extraction]
@@ -59,7 +59,7 @@ flowchart TD
   DB --> Export[Streamed JSON and CSV exports]
 ```
 
-- `cli.ts` parses commands and owns CLI shutdown. `app/main.tsx` starts the dashboard and holds the dataset lock; `app/useCollector.ts` handles UI polling and actions. Both front ends call `runner.ts` for browser collection, retries, and exports.
+- `cli.ts` parses commands and owns CLI shutdown. `app/main.ts` holds the dataset lock and opens the dashboard; `app/server.ts` serves `app/page.html` and a token-protected JSON API on 127.0.0.1 and runs one task at a time. Both front ends call `runner.ts` for browser collection, retries, and exports.
 - `pipeline.ts` composes the existing stage implementations. `batch.ts` handles status and targeted retries. Competitors and posts are processed sequentially.
 - `browser.ts` owns Chromium; `instagram-session.ts` handles manual login, saved cookies/local storage, and access checks. Browser extraction stays separate from local media processing and provider calls.
 - `profile-extract.ts` and `post-extract.ts` prefer matching Instagram JSON, then structural DOM and metadata fallbacks. Source snapshots preserve what was observed.
@@ -68,7 +68,7 @@ flowchart TD
 
 ## 2. Current command list
 
-Run CLI commands with `npm run cli -- <command>` after `npm run build`, or `npm run dev -- <command>` to compile first. `npm start` or `npm run app` opens the terminal dashboard. Below, TARGET means one or more registered usernames, or `--all`.
+Run CLI commands with `npm run cli -- <command>` after `npm run build`, or `npm run dev -- <command>` to compile first. `npm start` or `npm run app` opens the dashboard in your browser. Below, TARGET means one or more registered usernames, or `--all`.
 
 | CLI command | Options / purpose | npm alias |
 | --- | --- | --- |

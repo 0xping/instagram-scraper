@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Instagram research</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #fff; --ink: #1c1b18; --on-ink: #fff; --muted: #6e6b64; --faint: #a19d94; --line: #e7e5e0; --line-strong: #dad7d0;
+  --soft: #efede8; --ok: #1b6b44; --ok-bg: #e7f4ec; --warn: #8a5200; --warn-bg: #fbf1de; --busy: #2440b8; --busy-bg: #e8edfd; --bad: #b42318;
+  --avatar: #e3ded4; color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #121210; --panel: #1b1a17; --ink: #f2f0ea; --on-ink: #121210; --muted: #a8a49b; --faint: #77736b; --line: #2c2a26; --line-strong: #3a3833;
+    --soft: #26241f; --ok: #6fd3a0; --ok-bg: #12291d; --warn: #f2b65a; --warn-bg: #2d2211; --busy: #a9b8ff; --busy-bg: #1c2240; --bad: #ff8a80; --avatar: #2f2c27; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"; }
+h1, h2, h3 { margin: 0; line-height: 1.25; font-weight: 650; letter-spacing: -0.01em; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.muted { color: var(--muted); }
+
+button, .btn { font: inherit; font-size: 15px; font-weight: 600; height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--line-strong);
+  background: var(--panel); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; white-space: nowrap; text-decoration: none; }
+button:hover:not(:disabled), .btn:hover { border-color: var(--faint); }
+button:disabled { opacity: .35; cursor: not-allowed; }
+.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.primary:hover:not(:disabled) { border-color: var(--ink); opacity: .88; }
+.square { width: 44px; padding: 0; }
+input, select { font: inherit; font-size: 15px; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); min-width: 0; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--soft); color: var(--muted); white-space: nowrap; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); } .pill.warn { background: var(--warn-bg); color: var(--warn); } .pill.busy { background: var(--busy-bg); color: var(--busy); }
+.pill.dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pill.status { font-size: 13px; padding: 6px 12px; }
+
+header { position: sticky; top: 0; z-index: 5; height: 64px; padding: 0 32px; display: flex; align-items: center; gap: 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.logo { width: 28px; height: 28px; border-radius: 8px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; }
+.logo svg.i { width: 16px; height: 16px; }
+.title { font-weight: 650; font-size: 16px; margin-right: auto; text-decoration: none; }
+main { width: min(880px, 100% - 32px); margin: 0 auto; padding: 32px 0 64px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.connect { padding: 24px 28px; display: flex; align-items: center; gap: 24px; }
+.connect div { flex: 1; }
+.connect p { margin: 6px 0 0; color: var(--muted); }
+.banner { padding: 12px 16px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); font-weight: 500; }
+
+.activity { background: var(--ink); color: var(--on-ink); border-radius: 14px; padding: 20px 24px; display: grid; gap: 12px; }
+.activity.done { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
+.activity .head { display: flex; align-items: center; gap: 16px; }
+.activity .head > div { flex: 1; min-width: 0; }
+.activity h2 { font-size: 17px; }
+.activity .sub { font-size: 14px; opacity: .75; }
+.activity .primary { background: var(--on-ink); color: var(--ink); border-color: var(--on-ink); }
+.activity.done .primary { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.track { height: 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 22%, transparent); overflow: hidden; }
+.track > i { display: block; height: 100%; width: 0; background: currentColor; border-radius: 999px; transition: width .4s; }
+.track.indeterminate > i { width: 30%; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.foot { font-size: 13px; opacity: .75; }
+.link { background: none; border: 0; height: auto; padding: 0; font-size: inherit; font-weight: 600; color: inherit; text-decoration: underline; }
+.log { max-height: 240px; overflow: auto; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: color-mix(in srgb, currentColor 8%, transparent);
+  border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
+.log .warn { color: var(--warn); } .log .error { color: var(--bad); }
+.activity:not(.done) .log .warn, .activity:not(.done) .log .error { color: inherit; font-weight: 700; }
+.log time { opacity: .6; margin-right: 8px; }
+
+.list-head { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.list-head h1 { font-size: 28px; margin-right: auto; }
+.list-head h1 span { color: var(--faint); font-weight: 500; }
+.list-head input { width: 200px; }
+.add { display: flex; gap: 8px; }
+.add input { flex: 1; }
+.hint { margin: -6px 0 0; font-size: 13px; color: var(--muted); }
+
+.rows { overflow: hidden; display: grid; }
+.row { display: flex; align-items: center; gap: 14px; padding: 12px 20px; text-decoration: none; color: var(--ink); }
+.row + .row { border-top: 1px solid var(--soft); }
+.row:hover { background: color-mix(in srgb, var(--soft) 60%, transparent); }
+.avatar { width: 40px; height: 40px; flex: none; border-radius: 50%; background: var(--avatar); color: var(--muted); font-weight: 650; display: grid; place-items: center; overflow: hidden; }
+.avatar { position: relative; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.row .who { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.row small { font-size: 13px; color: var(--muted); }
+.row .mini { width: 240px; max-width: 100%; height: 4px; border-radius: 999px; background: var(--soft); overflow: hidden; margin-top: 4px; }
+.row .mini > i { display: block; height: 100%; background: var(--busy); transition: width .4s; }
+.row .chev { color: var(--faint); }
+.empty { padding: 56px 24px; text-align: center; border: 1px dashed var(--line-strong); background: var(--panel); border-radius: 14px; display: grid; gap: 6px; }
+.empty b { font-size: 17px; }
+
+.back { font-size: 14px; color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; justify-self: start; }
+.back svg.i { width: 16px; height: 16px; }
+.acct { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.acct .avatar { width: 72px; height: 72px; font-size: 26px; }
+.acct .who { flex: 1; min-width: 220px; display: grid; gap: 4px; }
+.acct h1 { font-size: 26px; }
+.acct .who span { font-size: 14px; color: var(--muted); }
+.acct .actions { display: flex; gap: 8px; }
+.retry { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 18px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); }
+.retry span { flex: 1; font-size: 14px; font-weight: 500; }
+.grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tile { all: unset; cursor: pointer; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); }
+.tile:hover { border-color: var(--faint); }
+.tile:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.thumb { aspect-ratio: 1; position: relative; background: var(--soft); display: grid; place-items: center; color: var(--faint); }
+.thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.kind { position: absolute; top: 8px; left: 8px; padding: 3px 9px; border-radius: 999px; background: rgb(0 0 0 / .62); color: #fff; font-size: 12px; font-weight: 600; }
+.meta { padding: 10px 12px 12px; display: grid; gap: 4px; font-size: 13px; }
+.meta b { font-weight: 600; }
+.stats { display: flex; gap: 12px; color: var(--muted); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.stats span { display: inline-flex; align-items: center; gap: 4px; }
+.stats svg.i { width: 14px; height: 14px; }
+.more { justify-self: center; }
+
+[popover].menu { inset: auto; margin: 0; padding: 6px; width: 250px; border-radius: 12px; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgb(28 27 24 / .14); }
+.menu button { width: 100%; border: 0; border-radius: 8px; justify-content: flex-start; font-weight: 500; padding: 0 12px; }
+.menu button:hover:not(:disabled) { background: var(--soft); }
+.menu .danger { color: var(--bad); }
+
+dialog { border: 0; border-radius: 16px; padding: 0; background: var(--panel); color: var(--ink); width: min(460px, 100vw - 32px); box-shadow: 0 24px 60px rgb(0 0 0 / .25); }
+dialog::backdrop { background: rgb(28 27 24 / .5); }
+dialog form { padding: 28px; display: grid; gap: 14px; }
+dialog h2 { font-size: 20px; }
+dialog p { margin: 0; }
+.choice { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line-strong); cursor: pointer; }
+.choice:has(input:checked) { border: 2px solid var(--ink); padding: 0 15px; font-weight: 600; }
+.choice input[type=radio] { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); }
+.choice input[type=number] { width: 80px; height: 36px; padding: 0 10px; font-weight: 400; }
+.field { display: grid; gap: 6px; font-weight: 600; font-size: 14px; }
+.field input, .field select { width: 100%; font-weight: 400; }
+.field small { font-weight: 400; color: var(--muted); font-size: 13px; }
+.check { display: flex; align-items: center; gap: 10px; }
+.check input { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); }
+.buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.names { margin: 0; padding-left: 18px; max-height: 160px; overflow: auto; color: var(--muted); }
+
+dialog.post { width: min(1040px, 100vw - 32px); }
+.post-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: min(720px, 100vh - 48px); }
+.media { background: #121210; position: relative; display: flex; min-height: 0; }
+.strip { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; width: 100%; scrollbar-width: none; }
+.strip > * { flex: 0 0 100%; width: 100%; height: 100%; object-fit: contain; scroll-snap-align: center; background: #121210; }
+.nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; padding: 0; border-radius: 50%; border: 0; background: rgb(255 255 255 / .9); color: #111; }
+.nav.prev { left: 10px; } .nav.next { right: 10px; }
+.count { position: absolute; bottom: 12px; right: 12px; padding: 1px 9px; border-radius: 999px; background: rgb(0 0 0 / .6); color: #fff; font-size: 12px; }
+.no-media { margin: auto; color: #aaa; padding: 24px; text-align: center; }
+.info { padding: 24px 28px; overflow: auto; display: grid; gap: 16px; align-content: start; }
+.info .top { display: flex; align-items: center; gap: 10px; padding-right: 48px; }
+.info h3 { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.info .text { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.info .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.comments { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-size: 14px; }
+.comments li { display: grid; gap: 2px; }
+.frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 4px; }
+.frames img { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 4px; background: var(--soft); }
+.close { position: absolute; top: 14px; right: 14px; z-index: 2; width: 44px; padding: 0; border-radius: 50%; }
+
+.drop { position: fixed; inset: 88px 24px 24px; z-index: 20; border: 3px dashed var(--ink); border-radius: 20px; background: color-mix(in srgb, var(--bg) 94%, transparent);
+  display: grid; place-content: center; justify-items: center; gap: 12px; text-align: center; pointer-events: none; }
+.drop .logo { width: 64px; height: 64px; border-radius: 16px; }
+.drop .logo svg.i { width: 30px; height: 30px; }
+.drop b { font-size: 26px; font-weight: 650; }
+
+.toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); display: grid; gap: 8px; z-index: 30; width: max-content; max-width: calc(100vw - 32px); }
+.toast { display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 18px; min-height: 44px; border-radius: 12px; background: var(--ink); color: var(--on-ink); font-size: 14px; font-weight: 500;
+  box-shadow: 0 12px 32px rgb(0 0 0 / .2); animation: rise .2s ease-out; }
+.toast.error { background: var(--bad); color: #fff; }
+.toast button { height: 34px; padding: 0 12px; background: var(--on-ink); color: var(--ink); border: 0; }
+@keyframes rise { from { transform: translateY(8px); opacity: 0; } }
+
+@media (max-width: 720px) {
+  header { padding: 0 16px; } .title span { display: none; }
+  main { padding-top: 20px; }
+  .connect { flex-direction: column; align-items: stretch; padding: 20px; }
+  .list-head { flex-wrap: wrap; } .list-head h1 { font-size: 26px; } .list-head input { order: 3; width: 100%; }
+  .add { display: grid; grid-template-columns: 1fr 1fr; } .add input { grid-column: 1 / -1; }
+  .hint { display: none; }
+  .row { padding: 12px 14px; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .acct .actions { width: 100%; } .acct .actions .primary { flex: 1; }
+  .post-body { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; max-height: calc(100vh - 48px); overflow: auto; }
+  .media { height: 60vh; } .info { overflow: visible; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-cam" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+  <symbol id="i-hide" viewBox="0 0 24 24"><path d="M17.9 17.9A10 10 0 0 1 12 20c-7 0-11-8-11-8a18 18 0 0 1 5.1-5.9M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.2 3.2M1 1l22 22"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+  <symbol id="i-comment" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-12.2 7.5L3 21l2-5.6A8.4 8.4 0 1 1 21 11.5z"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+</svg>
+
+<header>
+  <span class="logo" aria-hidden="true"><svg class="i"><use href="#i-cam"/></svg></span>
+  <a class="title" href="#/"><span>Instagram research</span></a>
+  <span id="status" class="pill dot status" role="status">Loading…</span>
+  <button class="square" popovertarget="menu-main" aria-label="More"><svg class="i"><use href="#i-dots"/></svg></button>
+</header>
+<div id="menu-main" class="menu" popover>
+  <button data-act="reconnect"><svg class="i"><use href="#i-link"/></svg>Reconnect Instagram</button>
+  <button data-act="open-data"><svg class="i"><use href="#i-folder"/></svg>Open data folder</button>
+  <button data-act="export-all"><svg class="i"><use href="#i-down"/></svg>Export all accounts</button>
+  <button data-act="settings"><svg class="i"><use href="#i-gear"/></svg>Settings</button>
+</div>
+
+<main>
+  <div id="offline" class="banner" hidden>The app has stopped. Start it again, then reload this page.</div>
+  <div id="setup" class="banner" hidden></div>
+
+  <section id="connect" class="card connect" hidden>
+    <div><h2 id="connect-title">Connect Instagram first</h2>
+      <p>Log in to instagram.com in Chrome, then press Connect. It uses that login; your password is never seen or stored.</p></div>
+    <button id="connect-btn" class="primary">Connect Instagram</button>
+  </section>
+
+  <section id="activity" class="activity" hidden aria-live="polite">
+    <div class="head">
+      <div><h2 id="act-title"></h2><div id="act-sub" class="sub"></div></div>
+      <button id="stop" class="primary">Stop</button>
+      <button id="act-close" class="square" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="act-track" class="track"><i></i></div>
+    <div class="foot"><span id="act-foot"></span> <button id="act-details" class="link" aria-expanded="false">Details</button></div>
+    <div id="log" class="log" hidden></div>
+  </section>
+
+  <div id="home" style="display:grid;gap:16px">
+    <div class="list-head">
+      <h1>Accounts <span id="count"></span></h1>
+      <input id="filter" type="search" placeholder="Find" aria-label="Find an account" hidden>
+      <button id="collect-all" class="primary">Collect all</button>
+    </div>
+    <form id="add" class="add">
+      <label for="names" class="sr">Add accounts</label>
+      <input id="names" autocomplete="off" placeholder="Add accounts: paste @usernames or profile links">
+      <button>Add</button>
+      <button type="button" id="import"><svg class="i"><use href="#i-up"/></svg>Import file</button>
+      <input id="file" type="file" accept=".txt,.csv,text/plain,text/csv" multiple hidden>
+    </form>
+    <p class="hint">Or drop a .txt or .csv file anywhere on this page.</p>
+    <div id="accounts"></div>
+  </div>
+
+  <div id="account" style="display:grid;gap:20px" hidden>
+    <a class="back" href="#/"><svg class="i"><use href="#i-left"/></svg>Accounts</a>
+    <div class="acct">
+      <div class="avatar" id="a-avatar"></div>
+      <div class="who"><h1 id="a-name"></h1><span id="a-line1"></span><span id="a-line2"></span></div>
+      <div class="actions">
+        <button id="a-collect" class="primary">Collect</button>
+        <button id="a-folder"><svg class="i"><use href="#i-folder"/></svg>Open folder</button>
+        <button class="square" popovertarget="menu-account" aria-label="More for this account"><svg class="i"><use href="#i-dots"/></svg></button>
+      </div>
+    </div>
+    <div id="a-retry" class="retry" hidden><span></span><button id="a-retry-btn">Retry</button></div>
+    <div id="grid" class="grid"></div>
+    <button id="more" class="more" hidden>Show more</button>
+  </div>
+</main>
+<div id="menu-account" class="menu" popover>
+  <button data-act="export-one"><svg class="i"><use href="#i-down"/></svg>Export this account</button>
+  <button data-act="hide" class="danger"><svg class="i"><use href="#i-hide"/></svg>Hide account</button>
+</div>
+
+<div id="drop" class="drop" hidden>
+  <span class="logo"><svg class="i"><use href="#i-up"/></svg></span>
+  <b>Drop to add these accounts</b>
+  <span class="muted">A .txt with one username or link per line, or a .csv with a username column</span>
+</div>
+
+<dialog id="how-many">
+  <form id="how-many-form">
+    <h2 id="hm-title"></h2>
+    <div id="hm-note" class="muted"></div>
+    <label class="choice"><input type="radio" name="limit" value="all" checked>All posts</label>
+    <label class="choice"><input type="radio" name="limit" value="newest">The newest
+      <input type="number" id="hm-n" min="1" step="1" value="50" aria-label="Number of newest posts">posts</label>
+    <p class="muted" style="font-size:13px">Newest first. Asking for more later carries on further down.</p>
+    <div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Start</button></div>
+  </form>
+</dialog>
+
+<dialog id="hide-dialog">
+  <form id="hide-form">
+    <h2 id="hide-title"></h2>
+    <p class="muted">It leaves the list; everything saved stays on this computer. Add the same name again to bring it back.</p>
+    <div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Hide</button></div>
+  </form>
+</dialog>
+
+<dialog id="settings">
+  <form id="settings-form">
+    <h2>Settings</h2>
+    <label class="field">Video speech to text
+      <select name="service">
+        <option value="off">Off</option>
+        <option value="groq">Groq (free account, online)</option>
+        <option value="local">Whisper on this computer (free)</option>
+        <option value="openai">OpenAI (paid)</option>
+        <option value="custom">Another Whisper server</option>
+      </select>
+    </label>
+    <label class="field" data-for="groq openai"><span id="key-label">API key</span><input name="key" type="password" autocomplete="off" spellcheck="false"><small id="key-hint"></small></label>
+    <label class="field" data-for="custom">Whisper server address<input name="server" type="url" placeholder="http://127.0.0.1:8080/v1"></label>
+    <label class="field" data-for="local custom">Whisper model<input name="model" placeholder="large-v3-turbo"></label>
+    <small class="muted" data-for="local">Needs the Whisper server running: <code>instagram-scraper whisper start</code></small>
+    <label class="field">Comments per post<input name="comments" required pattern="[Aa][Ll][Ll]|[1-9][0-9]*" title="A number, or all"><small>A number, or <i>all</i>.</small></label>
+    <label class="field">Video images per second<input name="fps" type="number" required min="0.01" step="0.01"></label>
+    <label class="check"><input type="checkbox" name="show">Show the browser while collecting</label>
+    <div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<dialog id="post" class="post">
+  <button class="close" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  <div class="post-body"><div class="media" id="p-media"></div><div class="info" id="p-info"></div></div>
+</dialog>
+
+<div class="toasts" id="toasts" aria-live="assertive"></div>
+
+<script>
+'use strict';
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const $ = (selector) => document.querySelector(selector);
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const icon = (name) => `<svg class="i"><use href="#i-${name}"/></svg>`;
+const media = (path) => `/media?t=${encodeURIComponent(TOKEN)}&p=${encodeURIComponent(path)}`;
+const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+const whole = new Intl.NumberFormat();
+const count = (n) => n == null ? '–' : compact.format(n);
+const plural = (n, word) => `${whole.format(n)} ${word}${n === 1 ? '' : 's'}`;
+const date = (iso) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const KINDS = { reel: 'Reel', carousel: 'Carousel', image: 'Photo' };
+
+function ago(iso) {
+  const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
+  if (!Number.isFinite(seconds)) return 'never';
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  for (const [unit, size] of [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]]) {
+    if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit);
+  }
+  return 'just now';
+}
+
+async function api(path, body) {
+  const response = await fetch(path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'x-token': TOKEN, 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Something went wrong (${response.status}).`);
+  return data;
+}
+
+/** A short message at the bottom; `action` adds one button to it. */
+function toast(message, kind = 'info', action) {
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.innerHTML = `<span>${esc(message)}</span>`;
+  if (action) {
+    const button = document.createElement('button');
+    button.textContent = action.label;
+    button.onclick = () => { el.remove(); action.run(); };
+    el.append(button);
+  }
+  $('#toasts').append(el);
+  setTimeout(() => el.remove(), action ? 12000 : kind === 'error' ? 8000 : 4000);
+}
+
+async function act(run, success) {
+  try {
+    const result = await run();
+    if (success) toast(typeof success === 'function' ? success(result) : success);
+    return result ?? true;
+  } catch (error) {
+    toast(error.message, 'error');
+    return undefined;
+  } finally {
+    poll();
+  }
+}
+
+document.addEventListener('click', (event) => {
+  const closer = event.target.closest('[data-close]');
+  if (closer) closer.closest('dialog').close();
+  if (event.target.tagName === 'DIALOG') event.target.close();
+});
+
+// Menus open under their button and close after a choice.
+for (const menu of document.querySelectorAll('[popover].menu')) {
+  menu.addEventListener('toggle', (event) => {
+    if (event.newState !== 'open') return;
+    const r = document.querySelector(`[popovertarget="${menu.id}"]`).getBoundingClientRect();
+    menu.style.top = `${r.bottom + 6}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
+  });
+  menu.addEventListener('click', (event) => { if (event.target.closest('button')) menu.hidePopover(); });
+}
+
+// ---- State, polled once a second ---------------------------------------------------------------
+
+let S = null;
+let timer = null;
+let dismissed = null;
+
+async function poll() {
+  clearTimeout(timer);
+  try {
+    S = await api('/api/state');
+    $('#offline').hidden = true;
+    render();
+  } catch {
+    $('#offline').hidden = false;
+  }
+  timer = setTimeout(poll, 1000);
+}
+
+const busy = () => Boolean(S?.task?.running);
+/** How each account of the current or last collect is doing, by name. */
+const runRows = () => new Map(S.task?.kind === 'collect' ? S.task.accounts.map((a) => [a.username, a]) : []);
+
+function render() {
+  const connecting = busy() && S.task.kind === 'connect';
+  const [text, tone] = connecting ? ['Connecting…', 'busy'] : S.session === 'connected' ? ['Connected', 'ok']
+    : S.session === 'checking' ? ['Checking…', 'busy'] : ['Not connected', 'warn'];
+  $('#status').textContent = text;
+  $('#status').className = `pill dot status ${tone}`;
+  $('#connect').hidden = S.session === 'connected' || S.session === 'checking' || connecting;
+  $('#connect-title').textContent = S.session === 'expired' ? 'Instagram needs you to log in again' : 'Connect Instagram first';
+  $('#connect-btn').disabled = busy();
+  $('[data-act=reconnect]').hidden = S.session !== 'connected';
+  $('[data-act=reconnect]').disabled = busy();
+  $('#collect-all').disabled = busy() || !S.accounts.length;
+  $('#a-collect').disabled = busy();
+  $('#a-retry-btn').disabled = busy();
+  $('#setup').hidden = !S.setup.length;
+  $('#setup').textContent = S.setup.join(' ');
+  renderActivity();
+  renderAccounts();
+  if (current) renderAccountHead();
+}
+
+function renderActivity() {
+  const task = S.task;
+  const running = busy();
+  const quiet = !running && task && (task.kind === 'check' || task.kind === 'connect') && S.session === 'connected';
+  const panel = $('#activity');
+  panel.hidden = !task || quiet || (!running && dismissed === task.startedAt);
+  if (panel.hidden) return;
+  panel.classList.toggle('done', !running);
+  $('#stop').hidden = !running;
+  $('#stop').disabled = task.stopping;
+  $('#stop').textContent = task.stopping ? 'Stopping…' : 'Stop';
+  $('#act-close').hidden = running;
+
+  const rows = task.accounts;
+  const now = rows.find((a) => a.status === 'running');
+  const finished = rows.filter((a) => !['waiting', 'running'].includes(a.status)).length;
+  const attention = rows.filter((a) => a.status === 'attention').length;
+  const stopped = rows.some((a) => a.status === 'stopped' || a.status === 'not started');
+  $('#act-title').textContent = running ? (task.kind === 'collect' ? (rows.length === 1 ? `Collecting @${rows[0].username}` : `Collecting ${rows.length} accounts`) : task.label)
+    : task.kind === 'collect' ? (stopped ? 'Collect stopped' : attention ? `Collect finished · ${plural(attention, 'account')} need a look` : 'Collect finished')
+      : task.kind === 'retry' ? 'Retry finished' : S.session === 'connected' ? 'Connected' : 'Could not connect to Instagram';
+  $('#act-sub').textContent = now ? `${rows.length > 1 ? `@${now.username} · ` : ''}${now.stage}${now.items ? ` · ${whole.format(now.items.done)} of ${now.items.total == null ? '?' : whole.format(now.items.total)}` : ''}`
+    : running ? (task.stopping ? 'Stopping after the current item…' : 'Starting…') : `Finished ${ago(task.finishedAt)}.`;
+  const share = (a) => a.status === 'running' ? Math.min(1, (a.stagesDone + (a.items?.total ? a.items.done / a.items.total : 0)) / a.stagesTotal)
+    : ['waiting', 'not started'].includes(a.status) ? 0 : 1;
+  const pct = rows.length ? Math.round(rows.reduce((sum, a) => sum + share(a), 0) / rows.length * 100) : running ? null : 100;
+  $('#act-track').classList.toggle('indeterminate', pct === null);
+  $('#act-track').hidden = !running;
+  $('#act-track > i').style.width = pct === null ? '' : `${pct}%`;
+  $('#act-foot').textContent = running ? `${rows.length > 1 ? `Account ${Math.min(finished + 1, rows.length)} of ${rows.length} · ` : ''}Keeps going if you close this tab.` : '';
+
+  const log = $('#log');
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+  const html = S.logs.map((l) => `<div class="${l.level}"><time>${new Date(l.at).toLocaleTimeString()}</time>${esc(l.text)}</div>`).join('');
+  if (log.dataset.html !== html) {
+    log.innerHTML = html;
+    log.dataset.html = html;
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+}
+$('#act-close').onclick = () => { dismissed = S.task.startedAt; render(); };
+$('#stop').onclick = () => act(() => api('/api/stop', {}));
+$('#act-details').onclick = (event) => {
+  const log = $('#log');
+  log.hidden = !log.hidden;
+  event.target.setAttribute('aria-expanded', String(!log.hidden));
+  event.target.textContent = log.hidden ? 'Details' : 'Hide details';
+  log.scrollTop = log.scrollHeight;
+};
+
+// ---- Accounts ------------------------------------------------------------------------------------
+
+function avatar(a) {
+  // The letter stays underneath, so a picture that fails to load leaves it showing.
+  return esc(a.username[0].toUpperCase()) + (a.avatar ? `<img src="${media(a.avatar)}" alt="" loading="lazy" onerror="this.remove()">` : '');
+}
+
+let listKey = '';
+function renderAccounts() {
+  const filter = $('#filter').value.trim().toLowerCase().replace(/^@/, '');
+  const run = runRows();
+  const key = JSON.stringify([S.accounts, [...run.values()].map((r) => [r.username, r.status, r.stagesDone, r.items]), filter, busy()]);
+  if (key === listKey) return;
+  listKey = key;
+  $('#count').textContent = S.accounts.length || '';
+  $('#filter').hidden = S.accounts.length <= 8;
+  if (!S.accounts.length) {
+    $('#accounts').innerHTML = `<div class="empty"><b>No accounts yet</b><span class="muted">Paste usernames above, or import a list: a .txt with one per line, or a .csv with a username column.</span></div>`;
+    return;
+  }
+  const rows = S.accounts.filter((a) => a.username.includes(filter));
+  $('#accounts').innerHTML = `<div class="card rows">${rows.map((a) => {
+    const r = busy() ? run.get(a.username) : null;
+    const saved = a.postsCount != null && a.postsCount > a.saved ? `${whole.format(a.saved)} of ${plural(a.postsCount, 'post')}` : plural(a.saved, 'post');
+    const line = r?.status === 'running' ? `<span class="mini"><i style="width:${Math.round(Math.min(1, (r.stagesDone + (r.items?.total ? r.items.done / r.items.total : 0)) / r.stagesTotal) * 100)}%"></i></span>`
+      : `<small>${a.saved || a.lastAt ? `${saved} · collected ${esc(ago(a.lastAt))}` : 'Not collected yet'}</small>`;
+    const pill = r ? { running: '<span class="pill busy">Collecting</span>', waiting: '<span class="pill">Waiting</span>', done: '<span class="pill ok">Done</span>',
+      skipped: '<span class="pill ok">Up to date</span>', attention: '<span class="pill warn">Needs a look</span>' }[r.status] ?? ''
+      : a.failed ? `<span class="pill warn">${whole.format(a.failed)} failed</span>` : !a.saved && !a.lastAt ? '<span class="pill">New</span>' : '';
+    return `<a class="row" href="#/a/${encodeURIComponent(a.username)}"><span class="avatar">${avatar(a)}</span>
+      <span class="who"><b>@${esc(a.username)}</b>${line}</span>${pill}<svg class="i chev"><use href="#i-right"/></svg></a>`;
+  }).join('') || '<div class="row muted">No account matches.</div>'}</div>`;
+}
+$('#filter').oninput = renderAccounts;
+
+/** Adds what was pasted or imported, then offers to collect exactly those accounts. */
+async function addAccounts(text, source) {
+  const result = await act(() => api('/api/accounts', { text }));
+  if (!result) return false;
+  const skipped = result.skippedCount ? ` ${plural(result.skippedCount, 'line')} ${result.skippedCount === 1 ? 'was' : 'were'} not a username.` : '';
+  const what = result.added ? `Added ${plural(result.added, 'account')}` : `${result.usernames.length === 1 ? 'That account is' : 'Those accounts are'} already in the list`;
+  toast(`${what}${source ? ` from ${source}` : ''}.${skipped}`, 'info', busy() ? undefined : { label: `Collect ${result.usernames.length === 1 ? 'it' : 'them'}`, run: () => askCollect(result.usernames) });
+  return true;
+}
+$('#add').onsubmit = async (event) => {
+  event.preventDefault();
+  const text = $('#names').value.trim();
+  if (!text) { $('#names').focus(); return; }
+  if (await addAccounts(text)) $('#names').value = '';
+};
+// A pasted list keeps its separators: a one-line box would otherwise run the names together.
+$('#names').addEventListener('paste', (event) => {
+  const text = event.clipboardData.getData('text');
+  if (!/[\r\n]/.test(text)) return;
+  event.preventDefault();
+  event.target.setRangeText(text.trim().split(/\s*[\r\n]+\s*/).join(' '), event.target.selectionStart, event.target.selectionEnd, 'end');
+});
+$('#import').onclick = () => $('#file').click();
+$('#file').onchange = async (event) => { await importFiles(event.target.files); event.target.value = ''; };
+
+async function importFiles(files) {
+  const list = [...files];
+  if (!list.length) return;
+  const texts = await Promise.all(list.map((f) => f.text()));
+  await addAccounts(texts.join('\n'), list.length === 1 ? list[0].name : `${list.length} files`);
+}
+// Drop a file anywhere on the page.
+let dragDepth = 0;
+const hasFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
+addEventListener('dragenter', (event) => { if (!hasFiles(event)) return; dragDepth += 1; $('#drop').hidden = false; });
+addEventListener('dragleave', (event) => { if (!hasFiles(event)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $('#drop').hidden = true; });
+addEventListener('dragover', (event) => { if (hasFiles(event)) event.preventDefault(); });
+addEventListener('drop', (event) => {
+  if (!hasFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  $('#drop').hidden = true;
+  if (current) location.hash = '#/';
+  importFiles(event.dataTransfer.files);
+});
+
+// ---- Collecting ----------------------------------------------------------------------------------
+
+let pending = null;
+function askCollect(targets) {
+  if (S.session !== 'connected') {
+    toast(S.session === 'checking' ? 'Still checking the Instagram login. Try again in a moment.' : 'Connect Instagram first.', 'error');
+    return;
+  }
+  pending = targets;
+  const rows = targets === 'all' ? S.accounts : targets.map((u) => S.accounts.find((a) => a.username === u) ?? { username: u, postsCount: null });
+  const one = rows.length === 1 ? rows[0] : null;
+  $('#hm-title').textContent = one ? (one.postsCount != null ? `@${one.username} has ${plural(one.postsCount, 'post')}` : `Collect @${one.username}`)
+    : targets === 'all' ? `Collect all ${rows.length} accounts` : `Collect ${rows.length} accounts`;
+  $('#hm-note').innerHTML = one ? (one.postsCount != null ? 'Collect all of them, or only the newest?' : 'How many posts it has is known after the first collect.')
+    : targets === 'all' ? 'Accounts collected in the last day are skipped.'
+      : `<ul class="names">${rows.map((a) => `<li>@${esc(a.username)}${a.postsCount != null ? ` · ${plural(a.postsCount, 'post')}` : ''}</li>`).join('')}</ul>`;
+  $('#how-many-form').limit.value = 'all';
+  $('#how-many').showModal();
+}
+$('#collect-all').onclick = () => askCollect('all');
+$('#a-collect').onclick = () => askCollect([current]);
+$('#hm-n').onfocus = () => { $('#how-many-form').limit.value = 'newest'; };
+$('#how-many-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const newest = event.target.limit.value === 'newest';
+  const n = Number($('#hm-n').value);
+  if (newest && !(Number.isInteger(n) && n > 0)) { toast('Enter a whole number of posts.', 'error'); return; }
+  if (await act(() => api('/api/collect', { accounts: pending, maxPosts: newest ? n : null }))) {
+    $('#how-many').close();
+    dismissed = null;
+    scrollTo({ top: 0, behavior: 'smooth' });
+  }
+};
+const connect = () => act(() => api('/api/connect', {}), 'Connecting. If a login window opens, log in there.');
+$('#connect-btn').onclick = connect;
+
+// ---- Menus ----------------------------------------------------------------------------------------
+
+const exported = (r) => `Exported ${plural(r.files, 'file')}${r.failed ? ', with some errors (see Details)' : ''}. The folder is open.`;
+document.addEventListener('click', (event) => {
+  const action = event.target.closest('[data-act]')?.dataset.act;
+  if (action === 'reconnect') connect();
+  if (action === 'open-data') act(() => api('/api/open', { what: 'data' }));
+  if (action === 'export-all') act(() => api('/api/export', {}), exported);
+  if (action === 'export-one') act(() => api('/api/export', { account: current }), exported);
+  if (action === 'settings') openSettings();
+  if (action === 'hide') { $('#hide-title').textContent = `Hide @${current}?`; $('#hide-dialog').showModal(); }
+});
+
+async function openSettings() {
+  const s = await act(() => api('/api/settings'));
+  if (!s) return;
+  const form = $('#settings-form');
+  form.service.value = s.service;
+  form.key.value = '';
+  form.server.value = s.server;
+  form.model.value = s.model;
+  form.comments.value = s.comments;
+  form.fps.value = s.fps;
+  form.show.checked = s.show;
+  form.dataset.keys = JSON.stringify(s.keys);
+  showService();
+  $('#settings').showModal();
+}
+function showService() {
+  const form = $('#settings-form');
+  const service = form.service.value;
+  for (const el of form.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(service);
+  const keys = JSON.parse(form.dataset.keys || '{}');
+  $('#key-label').textContent = `${service === 'openai' ? 'OpenAI' : 'Groq'} API key`;
+  form.key.placeholder = keys[service] ? 'Saved. Leave empty to keep it.' : 'Paste the key';
+  $('#key-hint').textContent = service === 'groq' ? 'Free at console.groq.com.' : 'From platform.openai.com.';
+}
+$('#settings-form').service.onchange = showService;
+$('#settings-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const f = event.target;
+  if (await act(() => api('/api/settings', { service: f.service.value, key: f.key.value, server: f.server.value, model: f.model.value,
+    comments: f.comments.value, fps: Number(f.fps.value), show: f.show.checked }), 'Settings saved.')) $('#settings').close();
+};
+$('#hide-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const who = current;
+  if (await act(() => api('/api/hide', { account: who }), `@${who} hidden.`)) { $('#hide-dialog').close(); location.hash = '#/'; }
+};
+
+// ---- One account ----------------------------------------------------------------------------------
+
+let current = null;
+let loaded = [];
+let info = null;
+let seen = '';
+
+function route() {
+  const match = /^#\/a\/(.+)$/.exec(location.hash);
+  current = match ? decodeURIComponent(match[1]) : null;
+  $('#home').hidden = Boolean(current);
+  $('#account').hidden = !current;
+  scrollTo(0, 0);
+  if (current) { loaded = []; info = null; $('#grid').innerHTML = ''; loadPosts(true); }
+}
+addEventListener('hashchange', route);
+
+async function loadPosts(reset) {
+  const who = current;
+  let data;
+  try {
+    data = await api(`/api/posts?account=${encodeURIComponent(who)}&offset=${reset ? 0 : loaded.length}&limit=${reset ? Math.max(40, loaded.length) : 40}`);
+  } catch (error) {
+    toast(error.message, 'error');
+    location.hash = '#/';
+    return;
+  }
+  if (who !== current) return;
+  info = data.account;
+  loaded = reset ? data.posts : loaded.concat(data.posts);
+  $('#more').hidden = !data.more;
+  if (S) renderAccountHead();
+  $('#grid').innerHTML = loaded.length ? loaded.map(tile).join('')
+    : '<div class="empty" style="grid-column:1/-1"><b>No posts saved yet</b><span class="muted">Press Collect to get this account’s posts.</span></div>';
+}
+$('#more').onclick = () => loadPosts(false);
+
+function tile(p) {
+  const kind = KINDS[p.type] ?? 'Post';
+  return `<button class="tile" data-post="${p.id}" aria-label="${esc(kind)}${p.publishedAt ? ` from ${esc(date(p.publishedAt))}` : ''}">
+    <span class="thumb">${p.thumb ? `<img loading="lazy" src="${media(p.thumb)}" alt="">` : icon(p.type === 'reel' ? 'play' : 'image')}<span class="kind">${esc(kind)}</span></span>
+    <span class="meta"><b${p.publishedAt ? '' : ' class="muted"'}>${p.publishedAt ? esc(date(p.publishedAt)) : 'Details not collected yet'}</b>
+      <span class="stats"><span>${icon('heart')}${count(p.likes)}</span><span>${icon('comment')}${count(p.comments)}</span>${p.views != null ? `<span>${icon('eye')}${count(p.views)}</span>` : ''}</span></span>
+  </button>`;
+}
+$('#grid').addEventListener('click', (event) => {
+  const el = event.target.closest('[data-post]');
+  if (el) openPost(Number(el.dataset.post));
+});
+
+function renderAccountHead() {
+  const row = S.accounts.find((a) => a.username === current);
+  if (!row) { location.hash = '#/'; return; }
+  if (!info) return;
+  $('#a-name').textContent = `@${current}`;
+  const img = row.avatar ? media(row.avatar) : '';
+  if ($('#a-avatar').dataset.src !== img) { $('#a-avatar').innerHTML = avatar(row); $('#a-avatar').dataset.src = img; }
+  $('#a-line1').textContent = [info.name, info.followers != null && `${count(info.followers)} followers`].filter(Boolean).join(' · ');
+  $('#a-line1').hidden = !$('#a-line1').textContent;
+  const r = busy() ? runRows().get(current) : null;
+  $('#a-line2').textContent = r?.status === 'running' ? `Collecting now · ${r.stage}`
+    : `${whole.format(row.saved)}${row.postsCount != null && row.postsCount > row.saved ? ` of ${whole.format(row.postsCount)}` : ''} posts saved${row.lastAt ? ` · collected ${ago(row.lastAt)}` : ''}`;
+  $('#a-retry').hidden = !row.failed;
+  $('#a-retry span').textContent = `${plural(row.failed, 'post')} did not finish. Instagram or the network stopped ${row.failed === 1 ? 'it' : 'them'}.`;
+  // New posts arrived while this page was open: show them without losing the place.
+  const now = `${current}|${row.saved}|${row.lastAt}|${row.failed}`;
+  if (seen.startsWith(`${current}|`) && seen !== now) loadPosts(true);
+  seen = now;
+}
+$('#a-folder').onclick = () => act(() => api('/api/open', { what: 'account', account: current }));
+$('#a-retry-btn').onclick = () => act(() => api('/api/retry', { account: current }), 'Retrying. Progress is at the top.');
+
+// ---- One post ---------------------------------------------------------------------------------------
+
+async function openPost(id) {
+  const p = await act(() => api(`/api/post?id=${id}`));
+  if (!p) return;
+  const items = p.media.length ? p.media : p.thumb ? [{ path: p.thumb, video: false }] : [];
+  $('#p-media').innerHTML = items.length ? `<div class="strip" id="strip">${items.map((m) => m.video
+    ? `<video src="${media(m.path)}" controls playsinline preload="metadata"${p.thumb ? ` poster="${media(p.thumb)}"` : ''}></video>`
+    : `<img src="${media(m.path)}" alt="">`).join('')}</div>
+    ${items.length > 1 ? `<button class="nav prev" aria-label="Previous">${icon('left')}</button><button class="nav next" aria-label="Next">${icon('right')}</button><span class="count" id="p-count">1 / ${items.length}</span>` : ''}`
+    : '<div class="no-media">No photo or video saved for this post yet.</div>';
+  if (items.length > 1) {
+    const strip = $('#strip');
+    const step = (dir) => strip.scrollBy({ left: dir * strip.clientWidth, behavior: 'smooth' });
+    $('#p-media .prev').onclick = () => step(-1);
+    $('#p-media .next').onclick = () => step(1);
+    strip.onscroll = () => { $('#p-count').textContent = `${Math.round(strip.scrollLeft / strip.clientWidth) + 1} / ${items.length}`; };
+  }
+  $('#p-info').innerHTML = `
+    <div class="top"><span class="pill">${esc(KINDS[p.type] ?? 'Post')}</span><span class="muted">${p.publishedAt ? esc(date(p.publishedAt)) : ''}${p.location ? ` · ${esc(p.location)}` : ''}</span></div>
+    <div class="stats" style="font-size:14px">
+      <span>${icon('heart')}${p.likes == null ? 'Likes hidden' : plural(p.likes, 'like')}</span>
+      <span>${icon('comment')}${p.comments == null ? '–' : plural(p.comments, 'comment')}</span>
+      ${p.views != null ? `<span>${icon('eye')}${plural(p.views, 'view')}</span>` : ''}
+    </div>
+    <div class="actions">
+      <button id="p-folder" ${p.folder ? '' : 'disabled title="Nothing saved for this post yet"'}>${icon('folder')}Open folder</button>
+      ${p.url ? `<a class="btn" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${icon('out')}Open on Instagram</a>` : ''}
+    </div>
+    <div><h3>Caption</h3><p class="text" dir="auto">${p.caption ? esc(p.caption) : '<span class="muted">No caption.</span>'}</p></div>
+    ${p.type === 'reel' || p.transcript ? `<div><h3>Speech in the video</h3><p class="text" dir="auto">${p.transcript ? esc(p.transcript) : '<span class="muted">Not transcribed. Turn on video speech in Settings, then collect again.</span>'}</p></div>` : ''}
+    <div><h3>Top comments</h3>${p.topComments.length ? `<ul class="comments">${p.topComments.map((c) => `<li><b>@${esc(c.username)}${c.likes ? ` <span class="muted" style="font-weight:400">· ${plural(c.likes, 'like')}</span>` : ''}</b><span class="text" dir="auto">${esc(c.text)}</span></li>`).join('')}</ul>`
+      : '<p class="muted" style="margin:0">No comments saved.</p>'}</div>
+    ${p.frames.length ? `<div><h3>Video images (${whole.format(p.frames.length)})</h3><div class="frames">${p.frames.slice(0, 24).map((f) => `<img loading="lazy" src="${media(f)}" alt="">`).join('')}</div></div>` : ''}`;
+  if (p.folder) $('#p-folder').onclick = () => act(() => api('/api/open', { what: 'post', id: p.id }));
+  $('#post').showModal();
+  $('#p-info').scrollTop = 0;
+}
+$('#post').addEventListener('close', () => { $('#p-media').innerHTML = ''; });
+
+route();
+poll();
+</script>
+</body>
+</html>

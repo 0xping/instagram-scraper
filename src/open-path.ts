@@ -27,12 +27,14 @@ function launch(target: string): Promise<void> {
     command = 'explorer.exe'; args = [target];
   } else if (isWsl()) {
     command = 'explorer.exe';
-    args = [target.startsWith('https://') ? target : execFileSync('wslpath', ['-w', target], { encoding: 'utf8' }).trim()];
+    args = [/^https?:\/\//.test(target) ? target : execFileSync('wslpath', ['-w', target], { encoding: 'utf8' }).trim()];
   } else {
     command = 'xdg-open'; args = [target];
   }
   return new Promise((done, fail) => {
-    execFile(command, args, { timeout: 15_000 }, (error) => error ? fail(error) : done());
+    // explorer.exe exits with 1 even when it opened the window, so only a failure to start it counts.
+    execFile(command, args, { timeout: 15_000 }, (error) =>
+      error && !(command === 'explorer.exe' && typeof error.code === 'number') ? fail(error) : done());
   });
 }
 
@@ -45,5 +47,12 @@ export async function openInstagramUrl(url: string): Promise<void> {
   if (parsed.protocol !== 'https:' || !['instagram.com', 'www.instagram.com'].includes(parsed.hostname)) {
     throw new Error('Only Instagram HTTPS links can be opened');
   }
+  return launch(parsed.href);
+}
+
+/** Opens the dashboard in the default browser: only its own address on this computer. */
+export async function openAppUrl(url: string): Promise<void> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1') throw new Error('Only the local dashboard can be opened');
   return launch(parsed.href);
 }

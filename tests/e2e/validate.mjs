@@ -60,7 +60,7 @@ const post = (code) => state.posts.find((p) => p.code === code);
 const { server, url } = await startFakeInstagram(state, files);
 
 writeFileSync(join(work, '.env'), [
-  'DATA_DIR=./data', 'LOG_LEVEL=info', 'BROWSER_HEADED=false', 'NAVIGATION_TIMEOUT_MS=20000',
+  'DATA_DIR=./data', 'LOG_LEVEL=info', 'BROWSER_HEADED=false', 'BROWSER_KEEP_PROFILE=false', 'BROWSER_CHANNEL=', 'NAVIGATION_TIMEOUT_MS=20000',
   'DISCOVERY_SCROLL_DELAY_MS=400', 'DISCOVERY_MAX_IDLE_SCROLLS=2', `FFMPEG_PATH=${ffmpeg}`,
   'TRANSCRIPTION_PROVIDER=custom', `TRANSCRIPTION_BASE_URL=${url}/openai/v1`, 'TRANSCRIPTION_MODEL=whisper-1', 'TRANSCRIPTION_API_KEY=e2e-not-a-real-key',
   'COMMENTS_ROUND_DELAY_MS=300', 'COMMENTS_MAX_SECONDS=60', '',

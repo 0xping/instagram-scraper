@@ -1,6 +1,6 @@
 # instagram-scraper
 
-**Archive any public Instagram account — posts, Reels, video frames, speech transcripts and comments — onto your own computer, from one terminal dashboard.**
+**Archive any public Instagram account — posts, Reels, video frames, speech transcripts and comments — onto your own computer, from one dashboard in your browser.**
 
 Made for competitor research: point it at the accounts you track, let it run, then browse or export everything as CSV, JSON and files you own. No API keys, no monthly fee, no data leaving your machine.
 
@@ -71,13 +71,22 @@ Needs about 1 GB of disk for the browser and FFmpeg, and an Instagram account yo
 
 ## Using it
 
-1. `instagram-scraper`
-2. **Connect Instagram** — log in to instagram.com in Chrome first, as you normally would. Connect reads that login from Chrome (macOS asks for keychain access: choose Allow), so Instagram's security check never sees an automated login. With no logged-in Chrome to read (Windows, WSL, another browser) a login window opens instead. The session is saved locally, and your password is never seen or stored by the tool.
-3. **Collect posts and media** — the list starts with *Add a new account* (paste usernames or profile links), then *All accounts*, then every account you track with its state: `@brand · 437 posts · all collected · 2 hours ago`, `never collected`, or `stopped early, run again`. Pick one and leave it running.
-4. **Review saved posts** — browse what was collected; photos, videos and frame folders open in your normal viewer.
-5. **Export data** — CSV and JSON in `exports/`.
+Run `instagram-scraper` (or double-click `Start.command` / `Start.bat`). The app opens in your browser and everything is a click. Keep the terminal window open while you use it; Ctrl+C there stops any collection and quits.
 
-Accounts with thousands of posts: when you collect an account, the dashboard shows how many posts it has and asks whether to collect all of them or only the newest N (the CLI uses `POST_LIMIT` or `scrape --post-limit N`). Discovery stops after the newest N, photos and Reels alike. Pinned posts sit at the top of the grid and count toward N. Raising the limit later walks further down on the next run; `all` walks the whole profile.
+1. **Connect Instagram.** Log in to instagram.com in Chrome first, as you normally would, then press **Connect Instagram**. It reads that login from Chrome (macOS asks for keychain access: choose Allow), so Instagram's security check never sees an automated login. With no logged-in Chrome to read (Windows, WSL, another browser), a login window opens instead. The badge at the top says whether you are connected. Your password is never seen or stored.
+2. **Add accounts.** Paste usernames or profile links, press **Import file**, or drop a file anywhere on the page:
+   - a `.txt` with one username or link per line (`#` lines are ignored);
+   - a `.csv` from a spreadsheet: when a column is headed `username`, `instagram`, `account`, `handle`, `profile`, `url` or `link`, only that column is read.
+
+   Lines that are not usernames are skipped and counted.
+3. **Collect.** After adding, press **Collect them** in the message, or **Collect all** (it skips accounts collected in the last day), or **Collect** on one account. It asks how many posts: *@brand has 1,000 posts: all, or the newest N?* (All is the default). Progress shows at the top with a **Stop** button. It keeps going if you close the tab, and launching the app again reopens the same page.
+4. **Review.** Click an account for its posts, and a post for its video or photos, caption, speech and top comments. **Open folder** and **Open on Instagram** are there too.
+
+The **⋯** menu at the top has *Open data folder*, *Export all accounts* (JSON and CSV, then the folder opens) and *Settings* (video speech to text, comments per post, video images per second, show the browser). The **⋯** on an account exports just that account or hides it (its data stays; add it again to bring it back). When some posts of an account failed, a **Retry** bar appears on its page.
+
+The page is served only to this computer (127.0.0.1), and its address carries a key that changes on every launch, so no other website can use it.
+
+Accounts with thousands of posts: collecting stops after the newest N you chose, photos and Reels alike. Pinned posts sit at the top of the grid and count toward N. Choosing more later carries on further down on the next run; *All* walks the whole profile. The CLI uses `POST_LIMIT` or `scrape --post-limit N`.
 
 Data is stored in `~/instagram-scraper-data` by default. Set `INSTAGRAM_SCRAPER_DATA` to keep separate datasets.
 
@@ -102,7 +111,7 @@ The tool stores and describes; it does no analysis. **Export data** is still the
 
 ### Transcripts
 
-Open **Settings → Video speech transcription** and pick one:
+Open **Settings → Video speech to text** and pick one:
 
 | Choice | Cost | Notes |
 | --- | --- | --- |

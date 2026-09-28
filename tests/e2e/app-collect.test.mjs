@@ -1,18 +1,20 @@
-/* global process, Buffer, URL, fetch, setTimeout */
-// Run by `npm run validate:e2e`, not the unit suite: it drives a real browser, so it needs the machine to itself.
-// The dashboard's own collection run: pressing "Collect posts and media" drives the real collector against the
-// fake Instagram from tests/e2e/, and "Stop current task" ends a run the way Ctrl-C does for the CLI.
+/* global process, Buffer, URL, fetch, setTimeout, window, DataTransfer, File, DragEvent */
+// Run by `npm run validate:e2e`, not the unit suite: it drives two real browsers, so it needs the machine to itself.
+// The dashboard end to end: a headless browser clicks through the real page while the collector it starts runs
+// against the fake Instagram from tests/e2e/. Set E2E_SHOTS=<folder> to keep screenshots of each step.
+//
+// The collector must use chromium.launch (patched below), not a kept profile: BROWSER_KEEP_PROFILE=true opens
+// the browser with launchPersistentContext, which this routing never sees, and the run then talks to the real
+// instagram.com and never connects. That is why the old dashboard test hung at "Instagram: connected".
 
 import assert from 'node:assert/strict';
-import { createElement } from 'react';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { render } from 'ink-testing-library';
 import { chromium } from 'playwright';
-import { App } from '../../dist/app/App.js';
-import { migrate, openDatabase, registerCompetitors } from '../../dist/db.js';
+import { startDashboard } from '../../dist/app/server.js';
+import { migrate, openDatabase } from '../../dist/db.js';
 import { createState, startFakeInstagram } from './fake-instagram.mjs';
 
 const USER = 'e2e_dash';
@@ -44,32 +46,17 @@ function routeChromium(server) {
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-/** Ink styles markers and labels separately, so matching needs the frame without colour codes. */
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-const plain = (frame) => (frame ?? '').replace(ANSI, '');
-// Generous: the whole suite runs these files in parallel, so a real browser run here competes for the CPU.
-async function until(check, timeoutMs = 600_000) {
+async function until(check, timeoutMs = 300_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value) return value;
-    if (Date.now() > deadline) throw new Error('timed out waiting for the dashboard');
+    if (Date.now() > deadline) throw new Error(`timed out waiting for: ${check}`);
     await wait(150);
   }
 }
 
-/** Walks the home menu to `label`, then opens it. */
-async function choose(ui, label) {
-  for (let i = 0; i < 12; i += 1) {
-    if (ui.lastFrame()?.includes(`› ${label}`)) break;
-    ui.stdin.write('\x1b[B');
-    await wait(60);
-  }
-  assert.match(ui.lastFrame(), new RegExp(`› ${label}`), `menu never reached ${label}`);
-  ui.stdin.write('\r');
-}
-
-test('the dashboard collects an account and stops a run on request', { timeout: 1_200_000 }, async () => {
+test('the dashboard connects, collects an account, shows its posts, and stops a run', { timeout: 900_000 }, async () => {
   const work = mkdtempSync(join(tmpdir(), 'app-collect-'));
   const dataDir = join(work, 'data');
   const t0 = 1788000000;
@@ -86,8 +73,9 @@ test('the dashboard collects an account and stops a run on request', { timeout: 
   globalThis.setTimeout = (fn, ms, ...rest) => realSetTimeout(fn, typeof ms === 'number' && ms >= 1000 && !Number.isInteger(ms) ? ms / 20 : ms, ...rest);
   const env = { ...process.env };
   Object.assign(process.env, {
-    BROWSER_HEADED: 'false', NAVIGATION_TIMEOUT_MS: '60000', DISCOVERY_SCROLL_DELAY_MS: '400', DISCOVERY_MAX_IDLE_SCROLLS: '2',
-    COMMENTS_ROUND_DELAY_MS: '300', COMMENTS_MAX_SECONDS: '60', TRANSCRIPTION_PROVIDER: '', GROQ_API_KEY: '', TRANSCRIPTION_API_KEY: '',
+    DATA_DIR: dataDir, BROWSER_HEADED: 'false', BROWSER_KEEP_PROFILE: 'false', BROWSER_CHANNEL: '', NAVIGATION_TIMEOUT_MS: '60000',
+    DISCOVERY_SCROLL_DELAY_MS: '400', DISCOVERY_MAX_IDLE_SCROLLS: '2', COMMENTS_ROUND_DELAY_MS: '300', COMMENTS_MAX_SECONDS: '60',
+    TRANSCRIPTION_PROVIDER: '', GROQ_API_KEY: '', TRANSCRIPTION_API_KEY: '',
   });
 
   mkdirSync(join(dataDir, 'raw'), { recursive: true });
@@ -97,50 +85,88 @@ test('the dashboard collects an account and stops a run on request', { timeout: 
   }));
   const db = openDatabase(join(dataDir, 'raw', 'collector.sqlite'));
   migrate(db);
-  registerCompetitors(db, [USER]);
-
-  const ui = render(createElement(App, { db, dataDir, envPath: join(work, '.env'), firstRun: false }));
+  const opened = [];
+  const dashboard = await startDashboard({ db, dataDir, envPath: join(work, '.env'), open: async (_, path) => { opened.push(path); } });
+  const viewer = await chromium.launch();
+  const page = await viewer.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const shot = async (name) => { if (process.env.E2E_SHOTS) await page.screenshot({ path: join(process.env.E2E_SHOTS, `${name}.png`) }); };
+  const count = (sql) => db.prepare(sql).get().n;
   try {
-    await until(() => ui.lastFrame()?.includes(`@${USER}`));
-    // Collecting is refused until the saved session has been checked, which the dashboard does on startup.
-    await until(() => ui.lastFrame()?.includes('Instagram: connected'));
-    await choose(ui, 'Collect posts and media');
-    await until(() => ui.lastFrame()?.includes('Add an account, or choose what to collect'));
-    for (let i = 0; i < 2; i += 1) { ui.stdin.write('\x1b[B'); await wait(80); } // past "Add a new account" and "All accounts"
-    await until(() => plain(ui.lastFrame()).includes(`› @${USER}`));
-    ui.stdin.write('\r');
-    // A never-collected account has no post count yet, so the question asks without one; Enter collects all.
-    await until(() => ui.lastFrame()?.includes(`How many of @${USER}'s newest posts`));
-    ui.stdin.write('\r');
+    await page.goto(dashboard.url);
+    // A saved login is checked on launch; collecting waits for it.
+    await until(async () => (await page.textContent('#status')) === 'Connected');
+    assert.equal(await page.locator('#connect').isHidden(), true);
 
-    // The run reaches the collector: both posts, their media and the comment are saved to this dataset.
-    const count = (sql) => db.prepare(sql).get().n;
+    // Import a spreadsheet export: only its Instagram column is read. The message offers to collect what was added.
+    await page.setInputFiles('#file', { name: 'brands.csv', mimeType: 'text/csv', buffer: Buffer.from(`Name,Instagram,Followers\nDash,https://www.instagram.com/${USER}/,1234\n`) });
+    await page.getByText('Added 1 account from brands.csv.').waitFor();
+    await shot('1-imported');
+    await page.getByRole('button', { name: 'Collect it' }).click();
+    // Its post count is unknown before the first run, and "All" is the default.
+    await page.locator('#how-many[open]').waitFor();
+    assert.equal(await page.textContent('#hm-title'), `Collect @${USER}`);
+    assert.equal(await page.locator('input[name=limit][value=all]').isChecked(), true);
+    await shot('2-how-many');
+    await page.click('#how-many-form button.primary');
+    await page.getByRole('button', { name: 'Stop' }).waitFor();
+    await until(async () => !/^(Starting|Checking)/.test(await page.textContent('#act-sub')));
+    await shot('3-collecting');
+
     await until(() => count("SELECT count(*) AS n FROM posts WHERE extraction_status = 'complete'") === 2);
     await until(() => count("SELECT count(*) AS n FROM media WHERE download_status = 'complete'") === 2);
     await until(() => count('SELECT count(*) AS n FROM comments') === 1);
-    assert.equal(db.prepare('SELECT followers_count AS n FROM competitors WHERE username = ?').get(USER).n, 1234, 'profile saved');
-    await until(() => ui.lastFrame()?.includes('Scrape finished'));
+    await until(async () => (await page.textContent('#act-title')) === 'Collect finished', 300_000);
     assert.equal(db.prepare("SELECT status FROM scrape_jobs WHERE job_type = 'pipeline' ORDER BY id DESC LIMIT 1").get().status, 'complete');
+    const row = page.locator(`a.row[href="#/a/${USER}"]`);
+    await until(async () => /2 posts · collected just now/.test(await row.textContent()));
+    await shot('4-finished');
 
-    // A second run is stopped from the menu: it ends promptly and says so, leaving the saved work alone.
-    await until(() => ui.lastFrame()?.includes('What would you like to do?'));
-    await choose(ui, 'Collect posts and media');
-    await until(() => ui.lastFrame()?.includes('Add an account, or choose what to collect'));
-    // The list now says the account is fully collected, and when.
-    assert.match(plain(ui.lastFrame()), new RegExp(`@${USER} · 2 posts · all collected · (just now|\\d+ min ago)`));
-    for (let i = 0; i < 2; i += 1) { ui.stdin.write('\x1b[B'); await wait(80); }
-    await until(() => plain(ui.lastFrame()).includes(`› @${USER}`));
-    ui.stdin.write('\r');
-    // Now the profile's post count is known and the question names it.
-    await until(() => /@\S+ has [\d,]+ posts\. Collect all/.test(plain(ui.lastFrame())));
-    ui.stdin.write('\r');
-    await until(() => ui.lastFrame()?.includes('Stop current task'));
-    await choose(ui, 'Stop current task');
-    await until(() => ui.lastFrame()?.includes('Stopping after the current item'));
-    await until(() => !ui.lastFrame()?.includes('Stop current task'), 600_000);
+    // Review: the account's grid, then one post with its caption and top comment.
+    await row.click();
+    await until(async () => (await page.locator('.tile').count()) === 2);
+    assert.match(await page.textContent('#a-line2'), /^2 posts saved · collected just now$/);
+    await page.locator('.tile').first().click();
+    await page.locator('#post[open]').waitFor();
+    assert.match(await page.textContent('#p-info'), /Dashboard post #one/);
+    assert.match(await page.textContent('#p-info'), /@fan_x.*Nice one/s);
+    // The fake photo is not a decodable image, so check the file arrives rather than that it draws.
+    const photo = await page.locator('#p-media img').getAttribute('src');
+    const served = await page.request.get(new URL(photo, dashboard.url).href);
+    assert.equal(served.status(), 200, 'the photo is served from the data folder');
+    assert.equal((await served.body()).length, jpeg.length);
+    await shot('5-post');
+    await page.click('#p-folder');
+    await until(() => opened.at(-1)?.endsWith(join('posts', 'DashImg001')));
+    await page.keyboard.press('Escape');
+    await page.click('#a-folder');
+    await until(() => opened.at(-1) === join('competitors', USER));
+
+    // A second run from the account page: the question now names the post count, and Stop ends the run.
+    await page.click('#a-collect');
+    await until(async () => /has \d+ posts?$/.test(await page.textContent('#hm-title')));
+    await page.click('#how-many-form button.primary');
+    await page.getByRole('button', { name: 'Stop' }).click();
+    await until(() => dashboard.collector.logs.some((l) => l.text.includes('Stopping after the current item')));
+    await until(() => !dashboard.collector.running, 300_000);
+    await until(async () => /^Collect (stopped|finished)/.test(await page.textContent('#act-title')));
     assert.equal(count("SELECT count(*) AS n FROM posts WHERE extraction_status = 'complete'"), 2, 'stopping kept the collected posts');
+
+    // A .txt dropped anywhere on the page adds its accounts too.
+    await page.evaluate(() => {
+      const data = new DataTransfer();
+      data.items.add(new File(['# more brands\nsecond_brand\n'], 'more.txt', { type: 'text/plain' }));
+      for (const type of ['dragenter', 'dragover', 'drop']) window.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    await page.getByText('Added 1 account from more.txt.').waitFor();
+    await until(async () => (await page.locator('a.row[href="#/a/second_brand"]').count()) === 1);
+    assert.equal(await page.locator('#drop').isHidden(), true);
+    await shot('6-dropped');
+    assert.deepEqual(errors, [], 'the page threw no errors');
   } finally {
-    ui.unmount();
+    await viewer.close();
+    await dashboard.close();
     db.close();
     restoreChromium();
     globalThis.setTimeout = realSetTimeout;

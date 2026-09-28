@@ -1,37 +1,29 @@
+/* global Buffer, URL, fetch */
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { test } from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
-import { createElement } from 'react';
-import { render } from 'ink-testing-library';
-import { App } from '../dist/app/App.js';
-import { parseCompetitorInput } from '../dist/app/model.js';
+import { parseAccountList } from '../dist/app/model.js';
+import { startDashboard } from '../dist/app/server.js';
 import { competitorStatus } from '../dist/batch.js';
 import { listCompetitors } from '../dist/competitors.js';
 import { hideCompetitor, migrate, openDatabase, registerCompetitors } from '../dist/db.js';
 import { saveSettings } from '../dist/env-file.js';
 import { openDataPath, openInstagramUrl, resolveDataPath } from '../dist/open-path.js';
 import { resolveCompetitors } from '../dist/runner.js';
-import { createTranscriptionProvider } from '../dist/transcription-provider.js';
 
-/** The frame without colour codes: Ink styles the marker and the label separately, so matching needs plain text. */
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-const plain = (frame) => (frame ?? '').replace(ANSI, '');
-
-async function until(check, attempts = 80) {
-  for (let i = 0; i < attempts; i++) {
-    if (check()) return;
-    await delay(50);
-  }
-  assert.fail('Dashboard did not reach the expected state');
-}
-
-test('dashboard competitor input accepts mixed forms and archive preserves data', () => {
-  assert.deepEqual(parseCompetitorInput(' @Alpha, https://instagram.com/beta/\n gamma @alpha'), ['alpha', 'beta', 'gamma']);
-  assert.throws(() => parseCompetitorInput('https://instagram.com/p/abc/'), /Not a profile/);
+test('pasted text and imported files give usernames, and archiving preserves data', () => {
+  assert.deepEqual(parseAccountList(' @Alpha, https://instagram.com/beta/\n gamma @alpha'), { usernames: ['alpha', 'beta', 'gamma'], skipped: [] });
+  assert.deepEqual(parseAccountList('https://instagram.com/p/abc/ @ok not!valid').skipped, ['https://instagram.com/p/abc/', 'not!valid']);
+  // A .txt list with comments and Windows line endings.
+  assert.deepEqual(parseAccountList('\uFEFF# my list\r\nnorthwind.studio\r\n@atelier.sable\r\n\r\n').usernames, ['northwind.studio', 'atelier.sable']);
+  // A spreadsheet export: only the named column is read, so follower counts are not taken for usernames.
+  const csv = 'Name,Instagram,Followers\n"North Wind",https://www.instagram.com/northwind.studio/,12000\nSable,@atelier.sable,800\nNo handle,,5\n';
+  assert.deepEqual(parseAccountList(csv), { usernames: ['northwind.studio', 'atelier.sable'], skipped: [] });
+  assert.deepEqual(parseAccountList('username;notes\nrue.ceramics;good\n').usernames, ['rue.ceramics']);
   const dir = mkdtempSync(join(tmpdir(), 'app-model-'));
   const db = openDatabase(join(dir, 'collector.sqlite'));
   try {
@@ -96,7 +88,7 @@ test('viewer paths cannot escape through traversal or symlinks', () => {
   }
 });
 
-test('opening a missing folder or invalid URL rejects without throwing into Ink input handling', async () => {
+test('opening a missing folder or invalid URL rejects instead of throwing', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'app-open-'));
   try {
     const missing = openDataPath(dir, 'competitors/missing');
@@ -110,219 +102,143 @@ test('opening a missing folder or invalid URL rejects without throwing into Ink 
   }
 });
 
-test('dashboard menu adds an account with arrows and Enter', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'app-ink-'));
-  const db = openDatabase(join(dir, 'collector.sqlite'));
-  try {
-    migrate(db);
-    registerCompetitors(db, ['brand']);
-    const ui = render(createElement(App, { db, dataDir: dir, envPath: join(dir, '.env'), firstRun: false }));
-    try {
-      await until(() => ui.lastFrame()?.includes('@brand'));
-      assert.match(ui.lastFrame(), /@brand/);
-      assert.match(ui.lastFrame(), /INSTAGRAM RESEARCH/);
-      assert.match(ui.lastFrame(), /What would you like to do\?/);
-      assert.ok(ui.lastFrame().split('\n').length <= 24, 'Home should fit a standard terminal height');
-      ui.stdin.write('\x1b[B');
-      await until(() => ui.lastFrame()?.includes('› Collect posts and media'));
-      ui.stdin.write('\r');
-      // Collecting and adding are one flow: the list opens on "Add a new account".
-      await until(() => plain(ui.lastFrame()).includes('› Add a new account'));
-      assert.match(plain(ui.lastFrame()), /@brand · never collected/, 'each account shows whether it is collected');
-      ui.stdin.write('\r');
-      await until(() => ui.lastFrame()?.includes('Add Instagram accounts'));
-      ui.stdin.write('newbrand');
-      await until(() => ui.lastFrame()?.includes('newbrand'));
-      ui.stdin.write('\r');
-      await until(() => db.prepare("SELECT count(*) n FROM competitors WHERE username = 'newbrand'").get().n === 1);
-      // Saving returns to the list, ready to collect what was just added.
-      await until(() => plain(ui.lastFrame()).includes('@newbrand'));
-      assert.match(plain(ui.lastFrame()), /Add an account, or choose what to collect/);
-    } finally { ui.unmount(); }
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('export menu lists only accounts holding posts and exports the chosen one', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'app-export-menu-'));
-  const previousDataDir = process.env.DATA_DIR;
+/** A dataset with one collected account (a photo post with a comment and a saved file) and one never collected. */
+async function dashboard(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'app-server-'));
+  const envKeys = ['DATA_DIR', 'TRANSCRIPTION_PROVIDER', 'TRANSCRIPTION_BASE_URL', 'TRANSCRIPTION_MODEL', 'COMMENT_LIMIT', 'FRAME_INTERVAL', 'BROWSER_SHOW', 'GROQ_API_KEY'];
+  const previous = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   process.env.DATA_DIR = dir;
   const db = openDatabase(join(dir, 'collector.sqlite'));
-  try {
-    migrate(db);
-    registerCompetitors(db, ['alpha', 'beta', 'untouched']);
-    for (const name of ['alpha', 'beta']) {
-      const id = db.prepare('SELECT id FROM competitors WHERE username = ?').get(name).id;
-      db.prepare("INSERT INTO posts (competitor_id, shortcode, url) VALUES (?, ?, ?)").run(id, `${name}Post01`, `https://www.instagram.com/p/${name}Post01/`);
-    }
-    const ui = render(createElement(App, { db, dataDir: dir, envPath: join(dir, '.env'), firstRun: false }));
-    try {
-      await until(() => ui.lastFrame()?.includes('Export data'));
-      for (const label of ['Collect posts and media', 'Review saved posts', 'Fix failed items', 'Export data']) {
-        ui.stdin.write('\x1b[B');
-        await until(() => ui.lastFrame()?.includes(`› ${label}`));
-      }
-      ui.stdin.write('\r');
-      await until(() => ui.lastFrame()?.includes('Export @beta'));
-      assert.match(ui.lastFrame(), /Export all accounts/);
-      assert.match(ui.lastFrame(), /Export @alpha/);
-      assert.doesNotMatch(ui.lastFrame(), /@untouched/, 'an account with nothing saved is not offered');
-      ui.stdin.write('\x1b[B');
-      await until(() => ui.lastFrame()?.includes('› Export @alpha'));
-      ui.stdin.write('\x1b[B');
-      await until(() => ui.lastFrame()?.includes('› Export @beta'));
-      ui.stdin.write('\r');
-      await until(() => existsSync(join(dir, 'exports', 'beta', 'beta.json')));
-      assert.equal(existsSync(join(dir, 'exports', 'alpha')), false);
-    } finally { ui.unmount(); }
-  } finally {
+  migrate(db);
+  registerCompetitors(db, ['alpha', 'beta']);
+  const alpha = db.prepare("SELECT id FROM competitors WHERE username = 'alpha'").get().id;
+  const post = Number(db.prepare(`INSERT INTO posts (competitor_id, shortcode, url, type, caption, published_at, likes_count, comments_count, extraction_status)
+    VALUES (?, 'AlphaPost1', 'https://www.instagram.com/p/AlphaPost1/', 'image', 'Hello', '2026-09-01T10:00:00Z', 12, 1, 'complete')`).run(alpha).lastInsertRowid);
+  const folder = join(dir, 'competitors', 'alpha', 'posts', 'AlphaPost1', 'media');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, '001.jpg'), Buffer.alloc(1000, 7));
+  db.prepare(`INSERT INTO media (post_id, position, local_path, download_status) VALUES (?, 0, 'competitors/alpha/posts/AlphaPost1/media/001.jpg', 'complete')`).run(post);
+  db.prepare("INSERT INTO comments (post_id, username, text, likes_count) VALUES (?, 'fan', 'Nice', 3)").run(post);
+  const opened = [];
+  const app = await startDashboard({ db, dataDir: dir, envPath: join(dir, '.env'), open: async (_, path) => { opened.push(path); } });
+  t.after(async () => {
+    await app.close();
     db.close();
-    if (previousDataDir === undefined) delete process.env.DATA_DIR;
-    else process.env.DATA_DIR = previousDataDir;
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(dir, { recursive: true, force: true });
-  }
+  });
+  const origin = new URL(app.url).origin;
+  const call = async (path, body) => {
+    const response = await fetch(origin + path, { method: body ? 'POST' : 'GET', headers: { 'x-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  };
+  return { app, db, dir, post, opened, origin, call };
+}
+
+/** fetch() will not send another Host header, so the rebinding check needs a raw request. */
+function withHost(origin, path, host) {
+  return new Promise((resolve, reject) => {
+    const { hostname, port } = new URL(origin);
+    request({ hostname, port, path, headers: { host } }, (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject).end();
+  });
+}
+
+test('the dashboard answers only with the launch token, on its own address, and serves only media from the dataset', async (t) => {
+  const { app, dir, origin } = await dashboard(t);
+  assert.match(app.url, /^http:\/\/127\.0\.0\.1:\d+\/\?t=[\w-]{20,}$/);
+  const page = await fetch(app.url);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  assert.equal(page.headers.get('referrer-policy'), 'no-referrer', 'the token must not leak to instagram.com through a link');
+  assert.equal((await fetch(`${origin}/`)).status, 403);
+  assert.equal((await fetch(`${origin}/?t=wrong`)).status, 403);
+  assert.equal((await fetch(`${origin}/api/state`)).status, 403);
+  assert.equal((await fetch(`${origin}/api/stop`, { method: 'POST', headers: { 'x-token': 'wrong' } })).status, 403);
+  assert.equal(await withHost(origin, `/?t=${app.token}`, `evil.example:${new URL(origin).port}`), 421);
+
+  const photo = `${origin}/media?t=${app.token}&p=competitors/alpha/posts/AlphaPost1/media/001.jpg`;
+  const full = await fetch(photo);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get('content-type'), 'image/jpeg');
+  assert.equal((await full.arrayBuffer()).byteLength, 1000);
+  const part = await fetch(photo, { headers: { range: 'bytes=100-199' } });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get('content-range'), 'bytes 100-199/1000');
+  assert.equal((await part.arrayBuffer()).byteLength, 100);
+  assert.equal((await fetch(`${photo}`.replace(app.token, 'wrong'))).status, 403);
+  assert.equal((await fetch(`${origin}/media?t=${app.token}&p=collector.sqlite`)).status, 404, 'the database is not media');
+  const outside = mkdtempSync(join(tmpdir(), 'app-outside-'));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(join(outside, 'secret.jpg'), 'x');
+  assert.equal((await fetch(`${origin}/media?t=${app.token}&p=${encodeURIComponent(join(outside, 'secret.jpg'))}`)).status, 404);
+  assert.equal((await fetch(`${origin}/media?t=${app.token}&p=../${outside.split('/').at(-1)}/secret.jpg`)).status, 404);
+  symlinkSync(outside, join(dir, 'linked'));
+  assert.equal((await fetch(`${origin}/media?t=${app.token}&p=linked/secret.jpg`)).status, 404);
 });
 
-test('post menu offers only the actions a post can perform', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'app-post-actions-'));
-  const db = openDatabase(join(dir, 'collector.sqlite'));
-  try {
-    migrate(db);
-    registerCompetitors(db, ['brand']);
-    const brand = db.prepare("SELECT id FROM competitors WHERE username = 'brand'").get().id;
-    // A Reel with a downloaded video and saved frames, and a post with nothing on disk yet.
-    const reel = db.prepare("INSERT INTO posts (competitor_id, shortcode, url, type, published_at) VALUES (?, 'ReelPost01', 'https://www.instagram.com/reel/ReelPost01/', 'reel', '2026-01-02T00:00:00Z')").run(brand).lastInsertRowid;
-    db.prepare("INSERT INTO posts (competitor_id, shortcode, url, type, published_at) VALUES (?, 'Missing001', 'https://www.instagram.com/p/Missing001/', 'image', '2026-01-01T00:00:00Z')").run(brand);
-    const videoDir = join(dir, 'competitors', 'brand', 'posts', 'ReelPost01', 'media');
-    mkdirSync(videoDir, { recursive: true });
-    writeFileSync(join(videoDir, '001.mp4'), 'video');
-    db.prepare(`INSERT INTO media (post_id, position, media_type, download_status, local_path)
-      VALUES (?, 0, 'video', 'complete', 'competitors/brand/posts/ReelPost01/media/001.mp4')`).run(reel);
-    db.prepare("INSERT INTO reel_frames (post_id, timestamp_seconds, image_path) VALUES (?, 0, 'competitors/brand/posts/ReelPost01/frames/g/frame_00001.jpg')").run(reel);
+test('the dashboard lists accounts, their posts, and one post in full', async (t) => {
+  const { call, post } = await dashboard(t);
+  const { body: state } = await call('/api/state');
+  assert.deepEqual(state.accounts.map((a) => [a.username, a.saved, a.text]), [['alpha', 1, 'All collected'], ['beta', 0, 'Never collected']]);
+  assert.equal(state.task, null, 'no task runs until asked: there is no saved login to check');
+  assert.equal(state.session, 'missing');
 
-    const ui = render(createElement(App, { db, dataDir: dir, envPath: join(dir, '.env'), firstRun: false }));
-    try {
-      await until(() => ui.lastFrame()?.includes('@brand'));
-      for (const label of ['Collect posts and media', 'Review saved posts']) {
-        ui.stdin.write('\x1b[B');
-        await until(() => ui.lastFrame()?.includes(`› ${label}`));
-      }
-      ui.stdin.write('\r');
-      await until(() => ui.lastFrame()?.includes('Which account would you like to review?'));
-      ui.stdin.write('\r');
-      await until(() => ui.lastFrame()?.includes('ReelPost01'));
-      ui.stdin.write('\r');
-      // The Reel can be played, its images opened, and its folder opened.
-      await until(() => ui.lastFrame()?.includes('Play the video'));
-      assert.match(ui.lastFrame(), /Open the 1 video images/);
-      assert.match(ui.lastFrame(), /Open this post’s folder/);
-      ui.stdin.write('\x1b');
+  const { body: grid } = await call('/api/posts?account=alpha');
+  assert.equal(grid.account.username, 'alpha');
+  assert.deepEqual(grid.posts.map((p) => [p.shortcode, p.type, p.likes, p.thumb]), [['AlphaPost1', 'image', 12, 'competitors/alpha/posts/AlphaPost1/media/001.jpg']]);
+  assert.equal(grid.more, false);
+  assert.equal((await call('/api/posts?account=nobody')).status, 404);
 
-      // The post with nothing downloaded offers none of those, so no entry can fail.
-      await until(() => ui.lastFrame()?.includes('Missing001'));
-      ui.stdin.write('\x1b[B');
-      await until(() => ui.lastFrame()?.includes('› Missing001') || ui.lastFrame()?.includes('Missing001'));
-      ui.stdin.write('\r');
-      await until(() => ui.lastFrame()?.includes('Scroll the details'));
-      const frame = ui.lastFrame();
-      assert.doesNotMatch(frame, /Play the video|Open the \d+ photos|Open the photo\b|Open the \d+ video images|Open this post/);
-      assert.match(frame, /Open on Instagram/);
-      assert.match(frame, /Post details/);
-    } finally { ui.unmount(); }
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const { body: detail } = await call(`/api/post?id=${post}`);
+  assert.equal(detail.caption, 'Hello');
+  assert.equal(detail.comments, 1, 'the comment count stays a number');
+  assert.deepEqual(detail.topComments.map((c) => [c.username, c.text]), [['fan', 'Nice']]);
+  assert.deepEqual(detail.media, [{ path: 'competitors/alpha/posts/AlphaPost1/media/001.jpg', video: false }]);
+  assert.equal(detail.url, 'https://www.instagram.com/p/AlphaPost1/');
+  assert.equal(detail.folder, true);
+  assert.equal((await call('/api/post?id=999')).status, 404);
 });
 
-test('review and fix menus leave out accounts with nothing to do', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'app-menu-filter-'));
-  const db = openDatabase(join(dir, 'collector.sqlite'));
-  try {
-    migrate(db);
-    registerCompetitors(db, ['withposts', 'untouched']);
-    const id = db.prepare("SELECT id FROM competitors WHERE username = 'withposts'").get().id;
-    db.prepare("INSERT INTO posts (competitor_id, shortcode, url) VALUES (?, 'HasPost001', 'https://www.instagram.com/p/HasPost001/')").run(id);
-    const ui = render(createElement(App, { db, dataDir: dir, envPath: join(dir, '.env'), firstRun: false }));
-    const menu = async (label) => {
-      for (let i = 0; i < 10 && !ui.lastFrame()?.includes(`› ${label}`); i += 1) {
-        ui.stdin.write('\x1b[B');
-        await delay(40);
-      }
-      await until(() => ui.lastFrame()?.includes(`› ${label}`));
-      ui.stdin.write('\r');
-    };
-    try {
-      await until(() => ui.lastFrame()?.includes('@withposts'));
-      // Reviewing offers only the account that has posts.
-      await menu('Review saved posts');
-      await until(() => ui.lastFrame()?.includes('Which account would you like to review?'));
-      assert.match(ui.lastFrame(), /@withposts/);
-      assert.doesNotMatch(ui.lastFrame(), /@untouched/);
-      ui.stdin.write('\x1b');
+test('the dashboard adds, hides, exports and opens folders it works out itself', async (t) => {
+  const { call, db, dir, post, opened } = await dashboard(t);
+  const added = (await call('/api/accounts', { text: '@Gamma, https://instagram.com/delta/ alpha no!pe' })).body;
+  assert.deepEqual([added.usernames, added.added, added.skipped], [['gamma', 'delta', 'alpha'], 2, ['no!pe']], 'alpha was already there');
+  assert.match((await call('/api/accounts', { text: 'https://instagram.com/p/abc/' })).body.error, /No Instagram usernames found/);
+  assert.equal((await call('/api/hide', { account: 'gamma' })).status, 200);
+  assert.deepEqual((await call('/api/state')).body.accounts.map((a) => a.username), ['alpha', 'beta', 'delta']);
+  assert.equal(db.prepare("SELECT count(*) n FROM competitors WHERE username = 'gamma'").get().n, 1, 'hiding keeps the data');
 
-      // Nothing has failed, so fixing says so instead of opening an empty list.
-      await until(() => ui.lastFrame()?.includes('What would you like to do?'));
-      await menu('Fix failed items');
-      await until(() => ui.lastFrame()?.includes('Nothing needs fixing right now.'));
+  // Collecting needs Instagram, and one account at a time is checked before anything starts.
+  assert.match((await call('/api/collect', { accounts: ['alpha'], maxPosts: null })).body.error, /Connect Instagram first/);
+  assert.match((await call('/api/collect', { accounts: ['alpha'], maxPosts: 0 })).body.error, /whole number/);
 
-      // Once a post fails, that account (and only that one) is offered.
-      db.prepare("UPDATE posts SET extraction_status = 'failed', availability = 'available' WHERE shortcode = 'HasPost001'").run();
-      await until(() => ui.lastFrame()?.includes('need attention'), 30_000);
-      await menu('Fix failed items');
-      await until(() => ui.lastFrame()?.includes('Which account needs another try?'));
-      assert.match(ui.lastFrame(), /@withposts/);
-      assert.doesNotMatch(ui.lastFrame(), /@untouched/);
-    } finally { ui.unmount(); }
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const exported = await call('/api/export', { account: 'alpha' });
+  assert.equal(exported.status, 200);
+  assert.ok(existsSync(join(dir, 'exports', 'alpha', 'alpha.json')));
+  assert.match(readFileSync(join(dir, 'exports', 'alpha', 'posts.csv'), 'utf8'), /AlphaPost1/);
+  assert.equal(existsSync(join(dir, 'exports', 'beta')), false);
+  assert.equal(opened.at(-1), 'exports', 'the export folder opens afterwards');
+
+  await call('/api/open', { what: 'data' });
+  await call('/api/open', { what: 'account', account: 'alpha' });
+  await call('/api/open', { what: 'post', id: post });
+  assert.deepEqual(opened.slice(-3), ['.', join('competitors', 'alpha'), join(dir, 'competitors', 'alpha', 'posts', 'AlphaPost1')]);
+  assert.equal((await call('/api/open', { what: 'account', account: '../../etc' })).status, 400);
+  assert.equal((await call('/api/open', { what: 'elsewhere', path: '/etc' })).status, 400, 'the page cannot name a path');
 });
 
-test('settings switch transcription to local Whisper in one step', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'app-whisper-'));
-  const envPath = join(dir, '.env');
-  writeFileSync(envPath, 'DATA_DIR=./data\n# keep me\n');
-  const keys = ['TRANSCRIPTION_PROVIDER', 'TRANSCRIPTION_BASE_URL', 'TRANSCRIPTION_MODEL', 'TRANSCRIPTION_API_KEY', 'GROQ_API_KEY'];
-  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  // Start from a known service, so choosing Whisper is a real change (re-picking the current one saves nothing).
-  for (const k of keys) delete process.env[k];
-  process.env.TRANSCRIPTION_PROVIDER = 'groq';
-  process.env.GROQ_API_KEY = 'test-key';
-  const db = openDatabase(join(dir, 'collector.sqlite'));
-  try {
-    migrate(db);
-    const ui = render(createElement(App, { db, dataDir: dir, envPath, firstRun: false }));
-    try {
-      await until(() => ui.lastFrame()?.includes('What would you like to do?'));
-      for (let i = 0; i < 10 && !ui.lastFrame()?.includes('› Settings'); i += 1) {
-        ui.stdin.write('\x1b[B');
-        await delay(40);
-      }
-      ui.stdin.write('\r');
-      await until(() => ui.lastFrame()?.includes('Video speech transcription: Groq'), 1200);
-      ui.stdin.write('\r'); // open the service picker, which starts on the first option
-      await until(() => plain(ui.lastFrame()).includes('❯ Off (no transcripts)'), 1200);
-      for (let i = 0; i < 2; i += 1) { ui.stdin.write('\x1b[B'); await delay(60); }
-      await until(() => plain(ui.lastFrame()).includes('❯ Whisper on this computer (free)'), 1200);
-      ui.stdin.write('\r');
-      // Everything the service needs is written at once, so transcription is ready without editing .env.
-      await until(() => readFileSync(envPath, 'utf8').includes('TRANSCRIPTION_PROVIDER'), 1200);
-      const env = readFileSync(envPath, 'utf8');
-      assert.match(env, /TRANSCRIPTION_PROVIDER="custom"/);
-      assert.match(env, /TRANSCRIPTION_BASE_URL="http:\/\/127\.0\.0\.1:8080\/v1"/);
-      assert.match(env, /TRANSCRIPTION_MODEL="large-v3-turbo"/);
-      assert.match(env, /# keep me/, 'other entries and comments survive');
-      const provider = createTranscriptionProvider();
-      assert.deepEqual([provider.name, provider.model], ['custom', 'large-v3-turbo']);
-      await until(() => ui.lastFrame()?.includes('Whisper server address'));
-    } finally { ui.unmount(); }
-  } finally {
-    db.close();
-    for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
-    rmSync(dir, { recursive: true, force: true });
-  }
+test('settings save everything a transcription choice needs in one step', async (t) => {
+  const { call, dir } = await dashboard(t);
+  const form = { service: 'local', comments: 'all', fps: 2, show: true };
+  const saved = await call('/api/settings', form);
+  assert.equal(saved.status, 200);
+  assert.deepEqual([saved.body.service, saved.body.comments, saved.body.fps, saved.body.show], ['local', 'all', 2, true]);
+  const env = readFileSync(join(dir, '.env'), 'utf8');
+  for (const line of ['TRANSCRIPTION_PROVIDER="custom"', 'TRANSCRIPTION_BASE_URL="http://127.0.0.1:8080/v1"', 'TRANSCRIPTION_MODEL="large-v3-turbo"',
+    'COMMENT_LIMIT="all"', 'FRAME_INTERVAL="0.5"', 'BROWSER_SHOW="true"']) assert.ok(env.includes(line), line);
+  delete process.env.GROQ_API_KEY;
+  assert.match((await call('/api/settings', { ...form, service: 'groq' })).body.error, /Groq API key/);
+  assert.match((await call('/api/settings', { ...form, comments: 'lots' })).body.error, /whole number/);
+  assert.match((await call('/api/settings', { ...form, fps: 0 })).body.error, /more than 0/);
+  assert.equal(readFileSync(join(dir, '.env'), 'utf8'), env, 'a refused form changes nothing');
 });
