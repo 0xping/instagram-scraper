@@ -116,6 +116,15 @@ main { width: min(880px, 100% - 32px); margin: 0 auto; padding: 32px 0 64px; dis
 .tile-del:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .tile-del svg.i { width: 15px; height: 15px; }
 @media (hover: hover) { .tile-del { opacity: 0; } .tile-wrap:hover .tile-del, .tile-del:focus-visible { opacity: 1; } }
+.grid.selecting .tile-del { display: none; }
+.grid.selecting .tile { position: relative; }
+.grid.selecting .tile::after { content: ""; position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff;
+  background: rgb(0 0 0 / .35); color: var(--on-ink); display: grid; place-items: center; font-size: 14px; font-weight: 700; box-sizing: border-box; }
+.grid.selecting .tile[aria-pressed="true"] { outline: 3px solid var(--ink); outline-offset: -3px; }
+.grid.selecting .tile[aria-pressed="true"]::after { content: "✓"; background: var(--ink); border-color: var(--ink); }
+.bulk { position: sticky; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 10px 10px 18px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line-strong); box-shadow: 0 12px 32px rgb(28 27 24 / .14); }
+.bulk span { flex: 1; font-size: 14px; font-weight: 600; }
 .thumb { aspect-ratio: 1; position: relative; background: var(--soft); display: grid; place-items: center; color: var(--faint); }
 .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .kind { position: absolute; top: 8px; left: 8px; padding: 3px 9px; border-radius: 999px; background: rgb(0 0 0 / .62); color: #fff; font-size: 12px; font-weight: 600; }
@@ -323,9 +332,13 @@ dialog.post { width: min(1040px, 100vw - 32px); }
         <option value="comments">Most comments</option><option value="views">Most views</option>
       </select>
       <span id="f-count" class="muted" role="status"></span>
+      <button type="button" id="f-select">Select</button>
     </form>
     <div id="grid" class="grid"></div>
     <button id="more" class="more" hidden>Show more</button>
+    <div id="bulk" class="bulk" hidden><span id="bulk-count" role="status"></span><button id="bulk-all">Select all shown</button>
+      <button id="bulk-copy"><svg class="i"><use href="#i-link"/></svg>Copy links</button>
+      <button id="bulk-delete" class="danger-btn">Delete</button><button id="bulk-done">Done</button></div>
   </div>
 </main>
 <div id="menu-account" class="menu" popover>
@@ -772,6 +785,7 @@ function route() {
   $('#home').hidden = Boolean(current);
   $('#account').hidden = !current;
   scrollTo(0, 0);
+  setSelecting(false);
   if (current) { loaded = []; info = null; $('#grid').innerHTML = ''; $('#filters').reset(); loadPosts(true); }
 }
 addEventListener('hashchange', route);
@@ -809,7 +823,7 @@ $('#more').onclick = () => loadPosts(false);
 
 function tile(p) {
   const kind = KINDS[p.type] ?? 'Post';
-  return `<div class="tile-wrap"><button class="tile" data-post="${p.id}" data-shortcode="${esc(p.shortcode)}" aria-label="${esc(kind)}${p.publishedAt ? ` from ${esc(date(p.publishedAt))}` : ''}">
+  return `<div class="tile-wrap"><button class="tile" data-post="${p.id}" aria-pressed="${picked.has(p.id)}" data-shortcode="${esc(p.shortcode)}" aria-label="${esc(kind)}${p.publishedAt ? ` from ${esc(date(p.publishedAt))}` : ''}">
     <span class="thumb">${p.thumb ? `<img loading="lazy" src="${media(p.thumb)}" alt="">` : icon(p.type === 'reel' ? 'play' : 'image')}<span class="kind">${esc(kind)}</span></span>
     <span class="meta"><b${p.publishedAt ? '' : ' class="muted"'}>${p.publishedAt ? esc(date(p.publishedAt)) : 'Details not collected yet'}</b>
       <span class="stats"><span>${icon('heart')}${count(p.likes)}</span><span>${icon('comment')}${count(p.comments)}</span>${p.views != null ? `<span>${icon('eye')}${count(p.views)}</span>` : ''}</span></span>
@@ -817,14 +831,43 @@ function tile(p) {
 }
 $('#grid').addEventListener('click', (event) => {
   const del = event.target.closest('[data-delete]');
-  if (del) {
-    if (busy()) toast('Wait for the collect to finish, then delete.', 'error');
-    else { deleting = Number(del.dataset.delete); $('#delete-dialog').showModal(); }
-    return;
-  }
+  if (del) { askDelete([Number(del.dataset.delete)]); return; }
   const el = event.target.closest('[data-post]');
-  if (el) openPost(Number(el.dataset.post));
+  if (!el) return;
+  if (!selecting) { openPost(Number(el.dataset.post)); return; }
+  const id = Number(el.dataset.post);
+  if (picked.has(id)) picked.delete(id); else picked.set(id, el.dataset.shortcode);
+  el.setAttribute('aria-pressed', picked.has(id));
+  renderBulk();
 });
+
+// Picked posts stay picked across filters and live reloads, so the count can include posts not shown.
+let selecting = false;
+const picked = new Map();
+function setSelecting(on) {
+  selecting = on;
+  picked.clear();
+  $('#grid').classList.toggle('selecting', on);
+  document.querySelectorAll('#grid .tile').forEach((el) => el.setAttribute('aria-pressed', 'false'));
+  $('#f-select').hidden = on;
+  renderBulk();
+}
+function renderBulk() {
+  $('#bulk').hidden = !selecting;
+  $('#bulk-count').textContent = picked.size ? `${plural(picked.size, 'post')} selected` : 'Click posts to select them';
+  $('#bulk-copy').disabled = $('#bulk-delete').disabled = !picked.size;
+  $('#bulk-delete').textContent = picked.size ? `Delete ${plural(picked.size, 'post')}` : 'Delete';
+}
+$('#f-select').onclick = () => setSelecting(true);
+$('#bulk-done').onclick = () => setSelecting(false);
+$('#bulk-all').onclick = () => {
+  for (const p of loaded) picked.set(p.id, p.shortcode);
+  document.querySelectorAll('#grid .tile').forEach((el) => el.setAttribute('aria-pressed', 'true'));
+  renderBulk();
+};
+$('#bulk-copy').onclick = () => act(() => navigator.clipboard.writeText([...picked.values()].map((code) => `https://www.instagram.com/p/${code}/`).join('\n')),
+  `Copied ${plural(picked.size, 'link')}.`);
+$('#bulk-delete').onclick = () => askDelete([...picked.keys()]);
 
 function renderAccountHead() {
   const row = S.accounts.find((a) => a.username === current);
@@ -885,16 +928,26 @@ async function openPost(id) {
       : '<p class="muted" style="margin:0">No comments saved.</p>'}</div>
     ${p.frames.length ? `<div><h3>Video images (${whole.format(p.frames.length)})</h3><div class="frames">${p.frames.slice(0, 24).map((f) => `<img loading="lazy" src="${media(f)}" alt="">`).join('')}</div></div>` : ''}`;
   if (p.folder) $('#p-folder').onclick = () => act(() => api('/api/open', { what: 'post', id: p.id }));
-  $('#p-delete').onclick = () => { deleting = p.id; $('#delete-dialog').showModal(); };
+  $('#p-delete').onclick = () => askDelete([p.id]);
   $('#post').showModal();
   $('#p-info').scrollTop = 0;
 }
-let deleting = null;
+let deleting = [];
+function askDelete(ids) {
+  if (busy()) { toast('Wait for the collect to finish, then delete.', 'error'); return; }
+  deleting = ids;
+  const many = ids.length > 1;
+  $('#delete-form h2').textContent = many ? `Delete ${plural(ids.length, 'post')}?` : 'Delete this post?';
+  $('#delete-confirm').textContent = many ? `Delete ${plural(ids.length, 'post')}` : 'Delete post';
+  $('#delete-dialog').showModal();
+}
 $('#delete-form').onsubmit = async (event) => {
   event.preventDefault();
-  if (!await act(() => api('/api/delete-posts', { ids: [deleting] }), 'Post deleted.')) return;
+  const done = await act(() => api('/api/delete-posts', { ids: deleting }), (r) => (r.deleted === 1 ? 'Post deleted.' : `${plural(r.deleted, 'post')} deleted.`));
+  if (!done) return;
   $('#delete-dialog').close();
   if ($('#post').open) $('#post').close();
+  if (selecting) setSelecting(false);
   loadPosts(true);
 };
 $('#post').addEventListener('close', () => { $('#p-media').innerHTML = ''; });
