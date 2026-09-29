@@ -110,6 +110,12 @@ main { width: min(880px, 100% - 32px); margin: 0 auto; padding: 32px 0 64px; dis
 .tile { all: unset; cursor: pointer; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); }
 .tile:hover { border-color: var(--faint); }
 .tile:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.tile-wrap { position: relative; display: grid; }
+.tile-del { all: unset; cursor: pointer; position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 999px; background: rgb(0 0 0 / .62); color: #fff; }
+.tile-del:hover { background: var(--bad); }
+.tile-del:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.tile-del svg.i { width: 15px; height: 15px; }
+@media (hover: hover) { .tile-del { opacity: 0; } .tile-wrap:hover .tile-del, .tile-del:focus-visible { opacity: 1; } }
 .thumb { aspect-ratio: 1; position: relative; background: var(--soft); display: grid; place-items: center; color: var(--faint); }
 .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .kind { position: absolute; top: 8px; left: 8px; padding: 3px 9px; border-radius: 999px; background: rgb(0 0 0 / .62); color: #fff; font-size: 12px; font-weight: 600; }
@@ -803,13 +809,19 @@ $('#more').onclick = () => loadPosts(false);
 
 function tile(p) {
   const kind = KINDS[p.type] ?? 'Post';
-  return `<button class="tile" data-post="${p.id}" data-shortcode="${esc(p.shortcode)}" aria-label="${esc(kind)}${p.publishedAt ? ` from ${esc(date(p.publishedAt))}` : ''}">
+  return `<div class="tile-wrap"><button class="tile" data-post="${p.id}" data-shortcode="${esc(p.shortcode)}" aria-label="${esc(kind)}${p.publishedAt ? ` from ${esc(date(p.publishedAt))}` : ''}">
     <span class="thumb">${p.thumb ? `<img loading="lazy" src="${media(p.thumb)}" alt="">` : icon(p.type === 'reel' ? 'play' : 'image')}<span class="kind">${esc(kind)}</span></span>
     <span class="meta"><b${p.publishedAt ? '' : ' class="muted"'}>${p.publishedAt ? esc(date(p.publishedAt)) : 'Details not collected yet'}</b>
       <span class="stats"><span>${icon('heart')}${count(p.likes)}</span><span>${icon('comment')}${count(p.comments)}</span>${p.views != null ? `<span>${icon('eye')}${count(p.views)}</span>` : ''}</span></span>
-  </button>`;
+  </button><button class="tile-del" data-delete="${p.id}" title="Delete post" aria-label="Delete post">${icon('trash')}</button></div>`;
 }
 $('#grid').addEventListener('click', (event) => {
+  const del = event.target.closest('[data-delete]');
+  if (del) {
+    if (busy()) toast('Wait for the collect to finish, then delete.', 'error');
+    else { deleting = Number(del.dataset.delete); $('#delete-dialog').showModal(); }
+    return;
+  }
   const el = event.target.closest('[data-post]');
   if (el) openPost(Number(el.dataset.post));
 });
@@ -882,7 +894,7 @@ $('#delete-form').onsubmit = async (event) => {
   event.preventDefault();
   if (!await act(() => api('/api/delete-posts', { ids: [deleting] }), 'Post deleted.')) return;
   $('#delete-dialog').close();
-  $('#post').close();
+  if ($('#post').open) $('#post').close();
   loadPosts(true);
 };
 $('#post').addEventListener('close', () => { $('#p-media').innerHTML = ''; });
