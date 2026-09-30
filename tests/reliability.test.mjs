@@ -157,3 +157,13 @@ test('profile capture releases its response listener before discovery keeps scro
   assert.equal(result.page, page);
   assert.equal(page.listenerCount('response'), 0);
 });
+
+test('a hidden browser on Linux gets its own virtual screen, never the real one', { skip: process.platform !== 'linux' }, async (t) => {
+  const { startXvfb } = await import('../dist/browser.js');
+  const xvfb = await startXvfb();
+  if (!xvfb) return t.skip('Xvfb is not installed');
+  assert.match(xvfb.display, /^:(99|1\d\d)$/, 'a high display number, so :0 (WSL\'s own screen) is left alone');
+  const exited = once(xvfb.process, 'exit');
+  xvfb.process.kill();
+  await exited;
+});

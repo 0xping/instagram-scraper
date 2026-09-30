@@ -1,3 +1,4 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import type { Logger } from './logger.js';
@@ -39,6 +40,7 @@ export class BrowserManager {
   private launching: Promise<Browser> | undefined;
   private persistent: BrowserContext | undefined;
   private readonly contexts = new Set<BrowserContext>();
+  private xvfb: Promise<{ process: ChildProcess; display: string } | null> | undefined;
 
   constructor(private readonly options: BrowserOptions, private readonly log: Logger) {}
 
@@ -47,12 +49,12 @@ export class BrowserManager {
     if (!this.browser?.isConnected()) {
       this.log.debug(`Launching Chromium (${this.options.headed ? 'headed' : 'headless'})`);
       // The CLI owns Ctrl-C/SIGTERM so it can record progress before closing; Playwright's own handlers would race it.
-      this.launching ??= chromium.launch({ ...this.launchOptions(), channel: this.options.channel || undefined })
+      this.launching ??= this.launchOptions().then((options) => chromium.launch({ ...options, channel: this.options.channel || undefined })
         .catch((error: unknown) => {
           if (!this.options.channel) throw error;
           this.warnMissingChannel();
-          return chromium.launch(this.launchOptions());
-        });
+          return chromium.launch(options);
+        }));
       try { this.browser = await this.launching; } finally { this.launching = undefined; }
     }
     const context = await this.browser.newContext(storageStatePath ? { storageState: storageStatePath } : {});
@@ -69,11 +71,12 @@ export class BrowserManager {
     if (!this.persistent) {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       this.log.debug(`Launching ${this.options.channel || 'Chromium'} with the profile in ${dir}`);
-      this.persistent = await chromium.launchPersistentContext(dir, { ...this.launchOptions(), channel: this.options.channel || undefined })
+      const options = await this.launchOptions();
+      this.persistent = await chromium.launchPersistentContext(dir, { ...options, channel: this.options.channel || undefined })
         .catch((error: unknown) => {
           if (!this.options.channel) throw error;
           this.warnMissingChannel();
-          return chromium.launchPersistentContext(dir, this.launchOptions());
+          return chromium.launchPersistentContext(dir, options);
         });
       this.track(this.persistent);
       this.persistent.on('close', () => { this.persistent = undefined; });
@@ -86,10 +89,27 @@ export class BrowserManager {
     return this.persistent;
   }
 
-  private launchOptions() {
+  private async launchOptions() {
     // The CLI owns Ctrl-C/SIGTERM so it can record progress before closing; Playwright's own handlers would race it.
     const args = this.hidden ? ['--window-position=-32000,-32000'] : [];
-    return { headless: !this.options.headed, args, handleSIGINT: false, handleSIGTERM: false };
+    return { headless: !this.options.headed, args, env: await this.hiddenScreen(), handleSIGINT: false, handleSIGTERM: false };
+  }
+
+  /**
+   * Linux: a hidden window goes on a virtual screen (Xvfb), still headed. WSL and Wayland pull an off-screen
+   * window back into view and ignore minimize, so the window would otherwise show. Without Xvfb, it may show.
+   */
+  private async hiddenScreen(): Promise<NodeJS.ProcessEnv | undefined> {
+    if (!this.hidden || process.platform !== 'linux') return undefined;
+    this.xvfb ??= startXvfb();
+    const xvfb = await this.xvfb;
+    if (!xvfb) {
+      this.log.warn('Could not start a hidden screen for the browser, so its window may show. On Linux this needs Xvfb: sudo apt install xvfb');
+      return undefined;
+    }
+    const env: NodeJS.ProcessEnv = { ...process.env, DISPLAY: xvfb.display };
+    delete env.WAYLAND_DISPLAY; // Chrome would open on the real screen through Wayland instead
+    return env;
   }
 
   /** A headed window kept out of sight. Headless is not an option: Instagram degrades headless pages. */
@@ -135,5 +155,28 @@ export class BrowserManager {
     this.contexts.clear();
     await browser?.close().catch(() => undefined);
     if (browser) this.log.debug('Chromium closed');
+    (await this.xvfb)?.process.kill();
+    this.xvfb = undefined;
   }
+}
+
+/** Starts a virtual X screen on a free display number, or null when Xvfb is not installed or does not start. */
+export function startXvfb(): Promise<{ process: ChildProcess; display: string } | null> {
+  // Numbers from 99 up: WSL's own screen :0 leaves no lock file, and Xvfb would otherwise take :0 over.
+  let n = 99;
+  while (existsSync(`/tmp/.X${n}-lock`) || existsSync(`/tmp/.X11-unix/X${n}`)) n++;
+  return new Promise((resolve) => {
+    // Only the abstract socket: WSL mounts /tmp/.X11-unix read-only. -displayfd writes the number to fd 3 once the
+    // screen is ready; -terminate exits once the browser disconnects.
+    const child = spawn('Xvfb', [`:${n}`, '-displayfd', '3', '-screen', '0', '1920x1080x24', '-nolisten', 'tcp', '-nolisten', 'unix', '-terminate'], {
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    });
+    const timer = setTimeout(() => { child.kill(); resolve(null); }, 10_000);
+    child.stdio[3]!.once('data', () => {
+      clearTimeout(timer);
+      resolve({ process: child, display: `:${n}` });
+    });
+    child.once('error', () => { clearTimeout(timer); resolve(null); });
+    child.once('exit', () => { clearTimeout(timer); resolve(null); });
+  });
 }
