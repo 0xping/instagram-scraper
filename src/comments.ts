@@ -31,7 +31,7 @@ export interface CommentLimits {
 }
 
 export interface CommentOptions extends ScrapeOptions {
-  /** null = `--limit all` (the safety limits still apply). */
+  /** null = `--limit all` (the safety limits still apply); 0 = collect none. */
   limit: number | null;
   force: boolean;
   limits: CommentLimits;
@@ -464,10 +464,11 @@ export async function scrapeComments(
 ): Promise<CommentRunSummary> {
   const { log } = options;
   const sleep = options.sleep ?? ((ms: number) => delay(ms, options.signal));
-  const posts = selectCommentPosts(db, competitor.id, options.limit, options.force, options.postIds);
+  // A limit of 0 turns comments off: no post page is opened for them.
+  const posts = options.limit === 0 ? [] : selectCommentPosts(db, competitor.id, options.limit, options.force, options.postIds);
   const summary: CommentRunSummary = { username: competitor.username, selected: posts.length, collected: 0, complete: 0, partial: 0, failed: 0, stoppedBy: null };
   if (posts.length === 0) {
-    log.info(`@${competitor.username}: no posts need comment collection (${options.force ? 'none extracted' : 'use --force to recollect'}).`);
+    log.info(`@${competitor.username}: no posts need comment collection (${options.limit === 0 ? 'the comment limit is 0' : options.force ? 'none extracted' : 'use --force to recollect'}).`);
     return summary;
   }
   log.info(`@${competitor.username}: ${posts.length} post(s) for comments, ${options.limit === null ? 'no comment limit (safety limits apply)' : `up to ${options.limit} each`}.`);

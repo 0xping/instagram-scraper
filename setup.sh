@@ -47,7 +47,7 @@ esac
 # 3. Collection defaults.
 title "Collection defaults"
 POSTS="$(ask "Newest posts (photos and Reels) to collect per account (number, or 'all')" "all")"
-COMMENTS="$(ask "Comments to save per post (number, or 'all')" "100")"
+COMMENTS="$(ask "Comments to save per post (number, 0 for none, or 'all')" "100")"
 FPS="$(ask "Images to save per second of video" "1")"
 BROWSER="$(ask "Show the browser window while collecting? (yes/no)" "no")"
 INTERVAL="$(node -e "const n=Number(process.argv[1]);process.stdout.write(Number.isFinite(n)&&n>0?String(1/n):'1')" "$FPS")"

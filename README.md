@@ -216,7 +216,7 @@ Runs sequentially: session check, profile, discovery, post metadata, image/carou
 | --- | --- |
 | `--skip-media` | Skip image/carousel and Reel downloads (frames and transcripts still use videos already on disk) |
 | `--skip-frames`, `--skip-transcripts`, `--skip-comments` | Skip that stage |
-| `--comment-limit N\|all` | Comments per post (default 100) |
+| `--comment-limit N\|all` | Comments per post (default 100; 0 collects none) |
 | `--force` | New job; full discovery walk; re-extract, re-frame, re-transcribe and revisit comments for every post (many page loads) |
 | `--resume` | Accepted for clarity; resuming is always on |
 | `--debug` | Debug logging |

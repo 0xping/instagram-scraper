@@ -19,7 +19,7 @@ The address, key included, is in `<data dir>/browser/dashboard-url`, for example
 | `GET /api/state` | | `session` (`connected`, `checking`, `missing` or `expired`), `accounts[]` (`username`, `saved`, `postsCount`, `failed`, `lastAt`, `text`), `task` (the running or last task, with per-account `status` and `stage`), `logs[]` |
 | `GET /api/posts` | `account`, optional `type` (`reel`, `carousel` or `image`), `q` (caption contains, any case), `sort` (`newest`, `oldest`, `likes`, `comments` or `views`), `offset`, `limit` (≤200) | `total` (posts matching), `posts[]` (`id`, `shortcode`, `type`, `publishedAt`, `likes`, `comments`, `views`), `more` |
 | `GET /api/post` | `id` | the full post: caption, media paths, transcript, top comments, frames |
-| `POST /api/accounts` | `{"text": "@a, https://instagram.com/b/"}` | `usernames`, `added`, `skipped` |
+| `POST /api/accounts` | `{"text": "@a, https://instagram.com/b/"}` | `usernames`, `added`, `skipped`. When Instagram is connected and no task runs, the new accounts' profiles (picture, name, counts) load in the background as a task |
 | `POST /api/collect` | `{"accounts": ["a"] or "all", "maxPosts": 20 or null}` | starts in the background; poll `/api/state` until `task.running` is false |
 | `POST /api/stop` | | stops the running task after its current item |
 | `POST /api/retry` | `{"account": "a"}` | retries that account's failed posts |

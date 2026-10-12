@@ -23,9 +23,8 @@ export function saveSettings(path: string, changes: Record<string, string>): voi
   const temp = `${path}.${randomUUID()}.tmp`;
   try {
     for (const [key, value] of Object.entries(changes)) process.env[key] = value;
-    const config = loadConfig(dirname(path));
+    loadConfig(dirname(path));
     if (process.env.TRANSCRIPTION_PROVIDER?.trim()) createTranscriptionProvider();
-    if (config.commentLimit !== null && config.commentLimit < 1) throw new Error('COMMENT_LIMIT must be positive or all');
     const original = existsSync(path) ? readFileSync(path, 'utf8') : '';
     const pending = new Set(Object.keys(changes));
     const lines = original.split(/\r?\n/).filter((line, index, all) => index < all.length - 1 || line !== '').flatMap((line) => {

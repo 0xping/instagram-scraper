@@ -119,6 +119,17 @@ test('selectCommentPosts: resumable states only, and only fully extracted posts'
   } finally { close(); }
 });
 
+test('a comment limit of 0 collects nothing and opens no page', async () => {
+  const { db, cid, addPost, close } = fixture();
+  try {
+    addPost('PendingPo01');
+    const quiet = { debug() {}, info() {}, warn() {}, error() {} };
+    // No browser is handed over: touching it would throw.
+    const s = await scrapeComments(db, null, null, { id: cid, username: 'x' }, { dataDir: '.', log: quiet, limit: 0, force: false, limits: {} });
+    assert.deepEqual([s.selected, s.collected, s.stoppedBy], [0, 0, null]);
+  } finally { close(); }
+});
+
 test('stalled partial threads stop retrying at the cap; limit partials reopen with a higher limit', () => {
   const { db, cid, addPost, close } = fixture();
   try {

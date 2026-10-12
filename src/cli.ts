@@ -455,7 +455,7 @@ function scrapeCommand(input: string[]): Promise<void> {
   if (flag('--debug')) process.env.LOG_LEVEL = 'debug';
   const limitArg = takeFlag(args, '--comment-limit', true);
   if (limitArg !== undefined) flags.commentLimit = limitArg === 'all' ? null : Number(limitArg);
-  if (flags.commentLimit !== null && (!Number.isSafeInteger(flags.commentLimit) || flags.commentLimit < 1)) throw new Error('--comment-limit needs a positive whole number or "all"');
+  if (flags.commentLimit !== null && (!Number.isSafeInteger(flags.commentLimit) || flags.commentLimit < 0)) throw new Error('--comment-limit needs a whole number (0 for none) or "all"');
   const recentArg = takeFlag(args, '--recent-hours', true);
   const recentHours = recentArg === undefined ? 24 : Number(recentArg);
   if (!Number.isFinite(recentHours) || recentHours < 0) throw new Error('--recent-hours needs a number of hours (0 = rerun every competitor)');

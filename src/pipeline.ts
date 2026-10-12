@@ -266,7 +266,7 @@ export interface CollectorFlags {
   skipFrames: boolean;
   skipTranscripts: boolean;
   skipComments: boolean;
-  /** null = all (the comment safety limits still apply). */
+  /** null = all (the comment safety limits still apply); 0 = none. */
   commentLimit: number | null;
 }
 
@@ -375,6 +375,7 @@ export function collectorStages(ctx: CollectorContext): Stage[] {
     {
       name: 'comments', browser: true, run: async () => {
         if (flags.skipComments) return { status: 'skipped', detail: '--skip-comments' };
+        if (flags.commentLimit === 0) return { status: 'skipped', detail: 'the comment limit is 0' };
         const inaccessible = inaccessibleProfile();
         if (inaccessible) return inaccessible;
         const s = await scrapeComments(db, context, session, competitor, { ...base, limit: flags.commentLimit, force: flags.force, limits: config.comments });

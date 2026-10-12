@@ -6,6 +6,7 @@ export interface AppConfig {
   dataDir: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   frameInterval: number;
+  /** null = all; 0 = none. */
   commentLimit: number | null;
   /** Instagram pages a day across every collection; null means no limit. */
   dailyPageLimit: number | null;
@@ -70,7 +71,8 @@ export function loadConfig(projectDir = process.cwd()): AppConfig {
       roundDelayMs: envPositiveInt('COMMENTS_ROUND_DELAY_MS', 2_500),
     },
     frameInterval: envPositiveNumber('FRAME_INTERVAL', 1),
-    commentLimit: process.env.COMMENT_LIMIT?.trim() === 'all' ? null : envPositiveInt('COMMENT_LIMIT', 100),
+    // 0 collects no comments at all.
+    commentLimit: process.env.COMMENT_LIMIT?.trim() === 'all' ? null : process.env.COMMENT_LIMIT?.trim() === '0' ? 0 : envPositiveInt('COMMENT_LIMIT', 100),
     // Modest daily activity is the best protection for the account doing the collecting.
     dailyPageLimit: process.env.DAILY_PAGE_LIMIT?.trim() === 'all' ? null : envPositiveInt('DAILY_PAGE_LIMIT', 300),
     dataDir: resolve(projectDir, dataDir),

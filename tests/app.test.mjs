@@ -255,6 +255,7 @@ test('settings save everything a transcription choice needs in one step', async 
   assert.match((await call('/api/settings', { ...form, fps: 0 })).body.error, /more than 0/);
   assert.match((await call('/api/settings', { ...form, dailyLimit: 'lots' })).body.error, /pages per day/);
   assert.equal(readFileSync(join(dir, '.env'), 'utf8'), env, 'a refused form changes nothing');
+  assert.equal((await call('/api/settings', { ...form, comments: '0' })).body.comments, '0', '0 turns comments off');
 });
 
 test('posts filter by type and caption, sort by a metric, and a deleted post stays deleted', async (t) => {

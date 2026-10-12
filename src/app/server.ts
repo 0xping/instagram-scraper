@@ -20,6 +20,7 @@ import { createLogger, redactLog, type Logger } from '../logger.js';
 import { postDir } from '../media-files.js';
 import { openDataPath, resolveDataPath } from '../open-path.js';
 import { dataPaths } from '../paths.js';
+import { collectProfiles } from '../profile-scraper.js';
 import { formatPipelineSummary, pipelineTotals } from '../pipeline.js';
 import { deletePosts, exportCompetitors, openCollector, resolveCompetitors, retryFailed, retryNeedsBrowser, scrapeCompetitors } from '../runner.js';
 import { spawn } from 'node:child_process';
@@ -48,7 +49,7 @@ const STAGES: Record<string, string> = {
 
 type Session = 'missing' | 'checking' | 'connected' | 'expired';
 interface Task {
-  kind: 'connect' | 'check' | 'collect' | 'retry';
+  kind: 'connect' | 'check' | 'collect' | 'retry' | 'profile';
   label: string;
   usernames: string[];
   startedAt: string;
@@ -221,8 +222,23 @@ function createCollector(db: Database.Database, dataDir: string) {
     });
   }
 
+  /** A new account's picture, name and counts, so it shows them before any post is collected. */
+  function profiles(usernames: string[]): void {
+    const label = usernames.length === 1 ? `Loading @${usernames[0]}'s profile` : `Loading ${usernames.length} profiles`;
+    work('profile', label, usernames, async (signal) => {
+      const settings = config();
+      browser = new BrowserManager({ ...settings.browser }, log);
+      const handle = await openCollector({ log, signal, config: settings, targets: usernames, browser });
+      try {
+        await collectProfiles(handle.db, handle.context, handle.session, handle.competitors, { dataDir: settings.dataDir, log, signal: handle.signal });
+      } finally {
+        await handle.close();
+      }
+    });
+  }
+
   return {
-    log, logs, config, stop, collect, retry, connect, check,
+    log, logs, config, stop, collect, retry, connect, check, profiles,
     get session() { return session; },
     get task() { return task; },
     get running() { return abort !== null; },
@@ -393,7 +409,7 @@ function saveFromForm(envPath: string, body: Record<string, unknown>): void {
     changes.TRANSCRIPTION_MODEL = text('model') || WHISPER_MODEL;
   } else throw new HttpError(400, 'Choose a transcription service.');
   const comments = text('comments').toLowerCase();
-  if (comments !== 'all' && !/^[1-9]\d*$/.test(comments)) throw new HttpError(400, 'Comments per post must be a whole number, or all.');
+  if (comments !== 'all' && !/^\d+$/.test(comments)) throw new HttpError(400, 'Comments per post must be a whole number (0 for none), or all.');
   changes.COMMENT_LIMIT = comments;
   const fps = Number(body.fps);
   if (!Number.isFinite(fps) || fps <= 0) throw new HttpError(400, 'Images per video second must be more than 0.');
@@ -531,6 +547,16 @@ export async function startDashboard(options: {
       if (!usernames.length) throw new HttpError(400, skipped.length ? `No Instagram usernames found (for example: ${skipped.slice(0, 3).join(', ')}).` : 'Paste a username or a profile link.');
       const added = registerCompetitors(db, usernames);
       if (added) collector.log.info(`Added ${added} account${added === 1 ? '' : 's'}.`);
+      // Their profiles load right away when Instagram allows it now; otherwise the first collect loads them.
+      const unseen = usernames.filter((u) => db.prepare('SELECT 1 FROM competitors WHERE username = ? AND last_scraped_at IS NULL').get(u));
+      if (unseen.length && collector.session === 'connected' && !collector.running) {
+        try {
+          assertMayCollect(db, collector.config().dailyPageLimit);
+          collector.profiles(unseen);
+        } catch (error) {
+          collector.log.debug(`Profiles not loaded yet: ${(error as Error).message}`);
+        }
+      }
       return { usernames, added, skipped: skipped.slice(0, 20), skippedCount: skipped.length };
     },
     'POST /api/collect': (body) => {
