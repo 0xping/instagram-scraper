@@ -34,7 +34,7 @@ test('dataset lock rejects a competing process and releases automatically on SIG
   const dir = mkdtempSync(join(tmpdir(), 'collector-lock-'));
   const module = new URL('../dist/db.js', import.meta.url).href;
   const child = spawn(process.execPath, ['--input-type=module', '-e',
-    `import { acquireDatasetLock } from ${JSON.stringify(module)}; acquireDatasetLock(process.argv[1]); process.stdout.write('locked'); setInterval(() => {}, 1000);`, dir]);
+    `import { acquireDatasetLock } from ${JSON.stringify(module)}; globalThis.lock = acquireDatasetLock(process.argv[1]); process.stdout.write('locked'); setInterval(() => {}, 1000);`, dir]);
   try {
     await once(child.stdout, 'data');
     assert.throws(() => acquireDatasetLock(dir), /Another collector command/);
